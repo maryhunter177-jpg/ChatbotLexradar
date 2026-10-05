@@ -8,7 +8,13 @@ import { BotService } from './services/bot-service.js';
 const config = getConfig();
 if (!config.adminToken || !config.bridgeToken) throw new Error('Defina BOT_ADMIN_TOKEN e BOT_BRIDGE_TOKEN no arquivo .env.');
 const store = new JsonStore(config.dataDir); store.load();
-const evolution = new EvolutionClient({ baseUrl: config.evolutionBaseUrl, apiKey: config.evolutionApiKey, timeoutMs: config.httpTimeoutMs });
+const evolution = new EvolutionClient({
+  baseUrl: config.evolutionBaseUrl,
+  apiKey: config.evolutionApiKey,
+  webhookUrl: config.evolutionWebhookUrl,
+  webhookSecret: config.evolutionWebhookSecret,
+  timeoutMs: config.httpTimeoutMs
+});
 const service = new BotService({ store, evolution, dispatchEnabled: config.dispatchEnabled });
 const server = http.createServer(createHandler({ service, config }));
 const timer = setInterval(() => service.tick().catch(() => {}), config.workerIntervalMs); timer.unref();

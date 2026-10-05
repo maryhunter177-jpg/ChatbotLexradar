@@ -1,7 +1,9 @@
 export class EvolutionClient {
-  constructor({ baseUrl, apiKey, timeoutMs = 15000, fetchImpl = fetch }) {
+  constructor({ baseUrl, apiKey, webhookUrl = '', webhookSecret = '', timeoutMs = 15000, fetchImpl = fetch }) {
     this.baseUrl = baseUrl;
     this.apiKey = apiKey;
+    this.webhookUrl = webhookUrl;
+    this.webhookSecret = webhookSecret;
     this.timeoutMs = timeoutMs;
     this.fetchImpl = fetchImpl;
   }
@@ -33,7 +35,24 @@ export class EvolutionClient {
     } finally { clearTimeout(timer); }
   }
 
-  createInstance(name) { return this.request('POST', '/instance/create', { instanceName: name, qrcode: true, integration: 'WHATSAPP-BAILEYS' }); }
+  createInstance(name) {
+    const payload = { instanceName: name, qrcode: true, integration: 'WHATSAPP-BAILEYS' };
+    if (this.webhookUrl) {
+      payload.webhook = {
+        enabled: true,
+        url: this.webhookUrl,
+        byEvents: false,
+        base64: false,
+        events: ['QRCODE_UPDATED', 'MESSAGES_UPSERT', 'MESSAGES_UPDATE', 'SEND_MESSAGE_UPDATE', 'CONNECTION_UPDATE'],
+        headers: this.webhookSecret ? { 'x-webhook-secret': this.webhookSecret } : {}
+      };
+      // Compatibilidade com o contrato anterior da linha 2.3.
+      payload.webhookUrl = this.webhookUrl;
+      payload.webhookByEvents = false;
+      payload.webhookEvents = payload.webhook.events;
+    }
+    return this.request('POST', '/instance/create', payload);
+  }
   connect(name) { return this.request('GET', `/instance/connect/${encodeURIComponent(name)}`); }
   connectionState(name) { return this.request('GET', `/instance/connectionState/${encodeURIComponent(name)}`); }
   sendText(name, number, text) { return this.request('POST', `/message/sendText/${encodeURIComponent(name)}`, { number, text }); }

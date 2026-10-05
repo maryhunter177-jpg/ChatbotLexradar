@@ -1,0 +1,119 @@
+name: lexradar-whatsapp
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: evolution
+      POSTGRES_USER: evolution
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U evolution -d evolution"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [internal]
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD}"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a $$REDIS_PASSWORD ping | grep PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    networks: [internal]
+
+  evolution:
+    image: evoapicloud/evolution-api:v2.3.7
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    environment:
+      SERVER_TYPE: http
+      SERVER_PORT: 8080
+      SERVER_URL: http://127.0.0.1:8080
+      TELEMETRY_ENABLED: "false"
+      CORS_ORIGIN: http://127.0.0.1:3100
+      LOG_LEVEL: ERROR,WARN,INFO
+      LOG_COLOR: "false"
+      DEL_INSTANCE: "false"
+      DEL_TEMP_INSTANCES: "false"
+      LANGUAGE: pt-BR
+      DATABASE_PROVIDER: postgresql
+      DATABASE_CONNECTION_URI: postgresql://evolution:${POSTGRES_PASSWORD}@postgres:5432/evolution?schema=public
+      DATABASE_CONNECTION_CLIENT_NAME: lexradar_evolution
+      DATABASE_SAVE_DATA_INSTANCE: "true"
+      DATABASE_SAVE_DATA_NEW_MESSAGE: "true"
+      DATABASE_SAVE_MESSAGE_UPDATE: "true"
+      DATABASE_SAVE_DATA_CONTACTS: "false"
+      DATABASE_SAVE_DATA_CHATS: "false"
+      DATABASE_SAVE_DATA_LABELS: "false"
+      DATABASE_SAVE_DATA_HISTORIC: "false"
+      CACHE_REDIS_ENABLED: "true"
+      CACHE_REDIS_URI: redis://:${REDIS_PASSWORD}@redis:6379/1
+      CACHE_REDIS_PREFIX_KEY: lexradar_evolution
+      CACHE_REDIS_SAVE_INSTANCES: "true"
+      CACHE_LOCAL_ENABLED: "false"
+      AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY}
+      AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES: "false"
+      CONFIG_SESSION_PHONE_CLIENT: LexRadar
+      CONFIG_SESSION_PHONE_NAME: Chrome
+      QRCODE_LIMIT: 30
+      WEBSOCKET_ENABLED: "false"
+      WEBHOOK_GLOBAL_ENABLED: "false"
+    volumes:
+      - evolution_instances:/evolution/instances
+    ports:
+      - "127.0.0.1:8080:8080"
+    networks: [internal]
+
+  bot:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      evolution: { condition: service_started }
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3100
+      BOT_DATA_DIR: /app/data
+      BOT_ADMIN_TOKEN: ${BOT_ADMIN_TOKEN}
+      BOT_BRIDGE_TOKEN: ${BOT_BRIDGE_TOKEN}
+      EVOLUTION_BASE_URL: http://evolution:8080
+      EVOLUTION_API_KEY: ${EVOLUTION_API_KEY}
+      EVOLUTION_WEBHOOK_SECRET: ${EVOLUTION_WEBHOOK_SECRET}
+      EVOLUTION_WEBHOOK_URL: http://bot:3100/webhooks/evolution
+      DISPATCH_ENABLED: ${DISPATCH_ENABLED:-false}
+      WORKER_INTERVAL_MS: 1000
+      HTTP_TIMEOUT_MS: 15000
+    volumes:
+      - bot_data:/app/data
+    ports:
+      - "127.0.0.1:3100:3100"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3100/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    networks: [internal]
+
+networks:
+  internal:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  evolution_instances:
+  bot_data:

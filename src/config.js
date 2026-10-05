@@ -32,6 +32,7 @@ export function getConfig() {
     evolutionBaseUrl: String(process.env.EVOLUTION_BASE_URL || '').replace(/\/+$/, ''),
     evolutionApiKey: process.env.EVOLUTION_API_KEY || '',
     evolutionWebhookSecret: process.env.EVOLUTION_WEBHOOK_SECRET || '',
+    evolutionWebhookUrl: process.env.EVOLUTION_WEBHOOK_URL || 'http://bot:3100/webhooks/evolution',
     dispatchEnabled: /^true$/i.test(process.env.DISPATCH_ENABLED || 'false'),
     workerIntervalMs: integer('WORKER_INTERVAL_MS', 1000, 250, 60000),
     httpTimeoutMs: integer('HTTP_TIMEOUT_MS', 15000, 1000, 120000),

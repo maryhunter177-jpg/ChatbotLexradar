@@ -6,4 +6,5 @@ data/*.lock
 logs/
 coverage/
 *.log
-
+.secrets/
+deploy/.env
