@@ -15,12 +15,37 @@ function publicLead(lead) {
   return { ...lead, phones: lead.phones.map(maskPhone) };
 }
 
+function instanceDefaults(instance, index = 0) {
+  return {
+    ...instance,
+    label: clean(instance.label || instance.name, 80),
+    enabled: instance.enabled !== false,
+    operationalMode: ['primary', 'standby', 'paused'].includes(instance.operationalMode)
+      ? instance.operationalMode
+      : (index === 0 ? 'primary' : 'standby'),
+    priority: Number.isInteger(instance.priority) ? instance.priority : index,
+    dailyLimit: Number.isInteger(instance.dailyLimit) ? instance.dailyLimit : 50,
+    sentToday: Number(instance.sentToday) || 0,
+    sentDay: instance.sentDay || '',
+    lastUsedAt: instance.lastUsedAt || ''
+  };
+}
+
+function healthy(instance) {
+  return instance.enabled && instance.operationalMode !== 'paused' && ['open', 'connected'].includes(instance.state);
+}
+
 export class BotService {
   constructor({ store, evolution, dispatchEnabled = false }) {
     this.store = store;
     this.evolution = evolution;
     this.dispatchEnabled = dispatchEnabled;
     this.processing = false;
+    const normalized = this.store.state.instances.map(instanceDefaults);
+    if (JSON.stringify(normalized) !== JSON.stringify(this.store.state.instances)) {
+      this.store.state.instances = normalized;
+      this.store.save();
+    }
   }
 
   status() {
@@ -80,21 +105,68 @@ export class BotService {
     if (!/^[a-zA-Z0-9_-]{2,60}$/.test(safeName)) throw new Error('Nome de instancia invalido.');
     if (this.store.state.instances.some((item) => item.name === safeName)) throw new Error('Instancia ja cadastrada.');
     const response = await this.evolution.createInstance(safeName);
-    const instance = { id: id(), name: safeName, enabled: true, state: 'created', dailyLimit: 50, sentToday: 0, sentDay: '', lastUsedAt: '', createdAt: nowIso() };
+    const hasPrimary = this.store.state.instances.some((item) => item.operationalMode === 'primary');
+    const instance = {
+      id: id(), name: safeName, label: safeName, enabled: true, state: 'created',
+      operationalMode: hasPrimary ? 'standby' : 'primary', priority: this.store.state.instances.length,
+      dailyLimit: 50, sentToday: 0, sentDay: '', lastUsedAt: '', createdAt: nowIso()
+    };
     this.store.update((state) => { state.instances.push(instance); audit(state, 'instance.created', { instance: safeName }); });
     return { instance, evolution: response };
   }
 
   async qr(name) { return this.evolution.connect(name); }
 
+  updateInstance(instanceId, input = {}) {
+    let result;
+    this.store.update((state) => {
+      const instance = state.instances.find((item) => item.id === instanceId);
+      if (!instance) throw new Error('Instancia nao encontrada.');
+      if (input.label !== undefined) instance.label = clean(input.label, 80) || instance.name;
+      if (input.enabled !== undefined) instance.enabled = Boolean(input.enabled);
+      if (input.dailyLimit !== undefined) {
+        const dailyLimit = Number(input.dailyLimit);
+        if (!Number.isInteger(dailyLimit) || dailyLimit < 1 || dailyLimit > 10000) throw new Error('Limite diario invalido.');
+        instance.dailyLimit = dailyLimit;
+      }
+      if (input.priority !== undefined) {
+        const priority = Number(input.priority);
+        if (!Number.isInteger(priority) || priority < 0 || priority > 999) throw new Error('Prioridade invalida.');
+        instance.priority = priority;
+      }
+      if (input.operationalMode !== undefined) {
+        if (!['primary', 'standby', 'paused'].includes(input.operationalMode)) throw new Error('Modo operacional invalido.');
+        if (input.operationalMode === 'primary') {
+          for (const item of state.instances) if (item.id !== instance.id && item.operationalMode === 'primary') item.operationalMode = 'standby';
+        }
+        instance.operationalMode = input.operationalMode;
+      }
+      instance.updatedAt = nowIso();
+      audit(state, 'instance.configured', { instance: instance.name, operationalMode: instance.operationalMode });
+      result = { ...instance };
+    });
+    return result;
+  }
+
+  setPrimaryInstance(instanceId) {
+    return this.updateInstance(instanceId, { operationalMode: 'primary', enabled: true });
+  }
+
   async refreshInstances() {
     const results = [];
+    let providerInstances = [];
+    if (typeof this.evolution.fetchInstances === 'function') {
+      try { providerInstances = await this.evolution.fetchInstances(); } catch { providerInstances = []; }
+    }
     for (const instance of this.store.state.instances) {
       try {
         const response = await this.evolution.connectionState(instance.name);
         const state = response?.instance?.state || response?.state || 'unknown';
+        const provider = providerInstances.find((item) => item?.name === instance.name || item?.instance?.instanceName === instance.name);
+        const owner = provider?.ownerJid || provider?.number || provider?.instance?.owner || '';
         instance.state = state; instance.lastHealthAt = nowIso(); instance.lastError = '';
-        results.push({ name: instance.name, state });
+        if (owner) instance.phoneNumber = clean(String(owner).replace(/@.*$/, ''), 30);
+        results.push({ name: instance.name, state, phoneNumber: instance.phoneNumber || '' });
       } catch (error) {
         instance.state = 'unavailable'; instance.lastHealthAt = nowIso(); instance.lastError = error.message;
         results.push({ name: instance.name, state: 'unavailable' });
@@ -112,7 +184,19 @@ export class BotService {
     const instanceIds = Array.isArray(input?.instanceIds) ? input.instanceIds : [];
     if (!instanceIds.length) throw new Error('Selecione ao menos uma instancia.');
     if (instanceIds.some((value) => !this.store.state.instances.some((instance) => instance.id === value))) throw new Error('Instancia desconhecida.');
-    const campaign = { id: id(), name: clean(input.name, 120) || 'Campanha sem nome', template, minDelayMs, maxDelayMs, instanceIds, status: 'draft', createdAt: nowIso(), nextDispatchAt: '' };
+    const primaryInstanceId = input?.primaryInstanceId || instanceIds[0];
+    if (!instanceIds.includes(primaryInstanceId)) throw new Error('Instancia principal deve participar da campanha.');
+    const fallbackInstanceIds = [...new Set(Array.isArray(input?.fallbackInstanceIds)
+      ? input.fallbackInstanceIds
+      : instanceIds.filter((value) => value !== primaryInstanceId))];
+    if (fallbackInstanceIds.includes(primaryInstanceId) || fallbackInstanceIds.some((value) => !instanceIds.includes(value))) throw new Error('Contingencia invalida.');
+    const failoverMode = input?.failoverMode || 'manual';
+    if (!['manual', 'automatic'].includes(failoverMode)) throw new Error('Modo de failover invalido.');
+    const campaign = {
+      id: id(), name: clean(input.name, 120) || 'Campanha sem nome', template, minDelayMs, maxDelayMs,
+      instanceIds, primaryInstanceId, fallbackInstanceIds, failoverMode,
+      status: 'draft', runtimeStatus: 'ready', createdAt: nowIso(), nextDispatchAt: ''
+    };
     this.store.update((state) => { state.campaigns.push(campaign); audit(state, 'campaign.created', { campaignId: campaign.id }); });
     return campaign;
   }
@@ -142,11 +226,42 @@ export class BotService {
     this.store.update((state) => { const campaign = state.campaigns.find((item) => item.id === campaignId); if (!campaign) throw new Error('Campanha nao encontrada.'); campaign.status = 'paused'; audit(state, 'campaign.paused', { campaignId }); });
   }
 
+  setCampaignRouting(campaignId, input = {}) {
+    let result;
+    this.store.update((state) => {
+      const campaign = state.campaigns.find((item) => item.id === campaignId);
+      if (!campaign) throw new Error('Campanha nao encontrada.');
+      const primaryInstanceId = input.primaryInstanceId || campaign.primaryInstanceId || campaign.instanceIds[0];
+      const fallbackInstanceIds = [...new Set(Array.isArray(input.fallbackInstanceIds) ? input.fallbackInstanceIds : (campaign.fallbackInstanceIds || []))];
+      const allIds = [primaryInstanceId, ...fallbackInstanceIds];
+      if (allIds.some((value) => !state.instances.some((instance) => instance.id === value))) throw new Error('Instancia desconhecida.');
+      if (fallbackInstanceIds.includes(primaryInstanceId)) throw new Error('A linha principal nao pode ser contingencia.');
+      const failoverMode = input.failoverMode || campaign.failoverMode || 'manual';
+      if (!['manual', 'automatic'].includes(failoverMode)) throw new Error('Modo de failover invalido.');
+      campaign.primaryInstanceId = primaryInstanceId;
+      campaign.fallbackInstanceIds = fallbackInstanceIds;
+      campaign.instanceIds = allIds;
+      campaign.failoverMode = failoverMode;
+      campaign.runtimeStatus = 'ready';
+      campaign.routingUpdatedAt = nowIso();
+      audit(state, 'campaign.routing-configured', { campaignId, failoverMode, primaryInstanceId, fallbackCount: fallbackInstanceIds.length });
+      result = { ...campaign };
+    });
+    return result;
+  }
+
   chooseInstance(campaign) {
     const day = new Date().toISOString().slice(0, 10);
-    const candidates = this.store.state.instances.filter((item) => campaign.instanceIds.includes(item.id) && item.enabled && ['open', 'connected'].includes(item.state));
+    const primaryId = campaign.primaryInstanceId || campaign.instanceIds[0];
+    const fallbackIds = campaign.fallbackInstanceIds || campaign.instanceIds.filter((value) => value !== primaryId);
+    const orderedIds = [primaryId, ...fallbackIds];
+    const candidates = orderedIds.map((instanceId) => this.store.state.instances.find((item) => item.id === instanceId)).filter(Boolean);
     for (const item of candidates) if (item.sentDay !== day) { item.sentDay = day; item.sentToday = 0; }
-    return candidates.filter((item) => item.sentToday < item.dailyLimit).sort((a, b) => String(a.lastUsedAt).localeCompare(String(b.lastUsedAt)))[0];
+    const available = (item) => healthy(item) && item.sentToday < item.dailyLimit;
+    if (available(candidates[0])) return { instance: candidates[0], usedFallback: false };
+    if ((campaign.failoverMode || 'manual') !== 'automatic') return undefined;
+    const fallback = candidates.slice(1).find(available);
+    return fallback ? { instance: fallback, usedFallback: true } : undefined;
   }
 
   async tick() {
@@ -157,8 +272,17 @@ export class BotService {
     if (!campaign || campaign.status !== 'active' || (campaign.nextDispatchAt && new Date(campaign.nextDispatchAt).getTime() > Date.now())) return false;
     const lead = this.store.state.leads.find((item) => item.id === due.leadId);
     if (!lead || lead.contactPermission !== 'approved') { due.status = 'blocked'; due.error = 'Lead sem permissao vigente.'; this.store.save(); return true; }
-    const instance = this.chooseInstance(campaign);
-    if (!instance) return false;
+    const route = this.chooseInstance(campaign);
+    if (!route) {
+      if (campaign.runtimeStatus !== 'waiting_instance') {
+        campaign.runtimeStatus = 'waiting_instance'; campaign.lastRoutingIssueAt = nowIso();
+        audit(this.store.state, 'campaign.waiting-instance', { campaignId: campaign.id, failoverMode: campaign.failoverMode || 'manual' });
+        this.store.save();
+      }
+      return false;
+    }
+    const { instance, usedFallback } = route;
+    campaign.runtimeStatus = usedFallback ? 'using_fallback' : 'ready';
     this.processing = true;
     due.status = 'sending'; due.instanceId = instance.id; due.attempts += 1; due.startedAt = nowIso(); this.store.save();
     try {
@@ -169,6 +293,7 @@ export class BotService {
       const delay = campaign.minDelayMs + Math.floor(Math.random() * (campaign.maxDelayMs - campaign.minDelayMs + 1));
       campaign.nextDispatchAt = new Date(Date.now() + delay).toISOString();
       audit(this.store.state, 'message.sent', { jobId: due.id, campaignId: campaign.id, instance: instance.name });
+      if (usedFallback) audit(this.store.state, 'campaign.failover-used', { campaignId: campaign.id, instance: instance.name });
     } catch (error) {
       due.error = clean(error.message, 500);
       if (error.permanent || due.attempts >= 3) due.status = 'failed';

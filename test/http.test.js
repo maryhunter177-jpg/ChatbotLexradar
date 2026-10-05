@@ -32,3 +32,21 @@ test('webhook rejeita segredo incorreto', async (t) => {
   const response = await fetch(`http://127.0.0.1:${server.address().port}/webhooks/evolution`, { method: 'POST', headers: { 'x-webhook-secret': 'wrong', 'content-type': 'application/json' }, body: '{}' });
   assert.equal(response.status, 401);
 });
+
+test('rotas administrativas configuram linha principal e contingencia', async (t) => {
+  const calls = [];
+  const service = {
+    setPrimaryInstance: (id) => { calls.push(['primary', id]); return { id, operationalMode: 'primary' }; },
+    updateInstance: (id, body) => { calls.push(['configure', id, body]); return { id, ...body }; },
+    recordWebhook: () => ({ duplicate: false })
+  };
+  const config = { adminToken: 'admin-secret', bridgeToken: 'bridge-secret', evolutionWebhookSecret: 'hook-secret' };
+  const server = http.createServer(createHandler({ service, config }));
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => server.close());
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const headers = { authorization: 'Bearer admin-secret', 'content-type': 'application/json' };
+  assert.equal((await fetch(`${base}/api/instances/i2/primary`, { method: 'POST', headers })).status, 200);
+  assert.equal((await fetch(`${base}/api/instances/i2/configure`, { method: 'POST', headers, body: JSON.stringify({ operationalMode: 'paused' }) })).status, 200);
+  assert.deepEqual(calls, [['primary', 'i2'], ['configure', 'i2', { operationalMode: 'paused' }]]);
+});

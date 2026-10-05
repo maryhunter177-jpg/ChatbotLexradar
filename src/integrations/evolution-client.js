@@ -17,7 +17,7 @@ export class EvolutionClient {
     try {
       const response = await this.fetchImpl(`${this.baseUrl}${route}`, {
         method,
-        headers: { apikey: this.apiKey, 'content-type': 'application/json', origin: 'http://127.0.0.1:3100' },
+        headers: { apikey: this.apiKey, 'content-type': 'application/json; charset=utf-8', origin: 'http://127.0.0.1:3100' },
         body: body === undefined ? undefined : JSON.stringify(body),
         signal: controller.signal
       });
@@ -55,5 +55,6 @@ export class EvolutionClient {
   }
   connect(name) { return this.request('GET', `/instance/connect/${encodeURIComponent(name)}`); }
   connectionState(name) { return this.request('GET', `/instance/connectionState/${encodeURIComponent(name)}`); }
+  fetchInstances() { return this.request('GET', '/instance/fetchInstances'); }
   sendText(name, number, text) { return this.request('POST', `/message/sendText/${encodeURIComponent(name)}`, { number, text }); }
 }

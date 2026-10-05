@@ -8,6 +8,7 @@
 - Todo lead exige aprovacao explicita e motivo registravel.
 - Uma mensagem por lead/campanha, usando inicialmente o primeiro celular normalizado; nenhum envio para todos os telefones sem nova decisao do contratante.
 - Job marcado `sending` antes da chamada externa. Interrupcao nesse ponto exige reconciliacao manual para impedir duplicidade.
+- Linha principal fixa por campanha, com contingencias ordenadas; failover manual por padrao e automatico somente quando configurado explicitamente.
 
 ## Decisoes necessarias antes de producao
 

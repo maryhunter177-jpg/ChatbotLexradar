@@ -3,9 +3,16 @@
 Fundacao do modulo complementar ao LexRadar 1.7.0. O projeto mantem o aplicativo final intacto e separa duas responsabilidades:
 
 - **Agente local (`bridge`)**: le `lexradar-data.json` em modo somente leitura e envia ao bot apenas leads finalizados com telefone.
-- **Servico do bot**: roda localmente para homologacao ou em VPS, gerencia instancias da Evolution API, campanhas, fila persistente, rodizio e delays.
+- **Servico do bot**: roda localmente para homologacao ou em VPS, gerencia instancias da Evolution API, campanhas, fila persistente, linha principal, contingencias e delays.
 
 Por seguranca, leads entram como `pending_review`, o worker inicia desabilitado e nenhum disparo ocorre sem aprovacao explicita.
+
+## Gestao de linhas
+
+- A primeira linha cadastrada nasce como `primary`; as seguintes entram como `standby`.
+- O painel permite promover, pausar, reativar, conferir conexao e ajustar limite diario por linha.
+- Campanhas usam uma linha principal fixa. O failover e `manual` por padrao e pode ser configurado como `automatic` por campanha.
+- Um failover nunca recria jobs: a chave de idempotencia preserva uma mensagem por lead/campanha/telefone.
 
 ## Inicio local
 

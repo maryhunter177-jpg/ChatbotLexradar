@@ -30,11 +30,17 @@ export function createHandler({ service, config }) {
       if (req.method === 'POST' && url.pathname === '/api/instances/refresh') return sendJson(res, 200, await service.refreshInstances());
       let match = url.pathname.match(/^\/api\/instances\/([^/]+)\/qr$/);
       if (req.method === 'GET' && match) return sendJson(res, 200, await service.qr(decodeURIComponent(match[1])));
+      match = url.pathname.match(/^\/api\/instances\/([^/]+)\/configure$/);
+      if (req.method === 'POST' && match) { const { json } = await readBody(req); return sendJson(res, 200, service.updateInstance(match[1], json)); }
+      match = url.pathname.match(/^\/api\/instances\/([^/]+)\/primary$/);
+      if (req.method === 'POST' && match) return sendJson(res, 200, service.setPrimaryInstance(match[1]));
       if (req.method === 'POST' && url.pathname === '/api/campaigns') { const { json } = await readBody(req); return sendJson(res, 201, service.createCampaign(json)); }
       match = url.pathname.match(/^\/api\/campaigns\/([^/]+)\/activate$/);
       if (req.method === 'POST' && match) { const { json } = await readBody(req); return sendJson(res, 200, service.activateCampaign(match[1], json.leadIds)); }
       match = url.pathname.match(/^\/api\/campaigns\/([^/]+)\/pause$/);
       if (req.method === 'POST' && match) { service.pauseCampaign(match[1]); return sendJson(res, 200, { ok: true }); }
+      match = url.pathname.match(/^\/api\/campaigns\/([^/]+)\/routing$/);
+      if (req.method === 'POST' && match) { const { json } = await readBody(req); return sendJson(res, 200, service.setCampaignRouting(match[1], json)); }
       return sendJson(res, 404, { error: 'Rota nao encontrada.' });
     } catch (error) {
       const status = Number(error.status) || (String(error.message).includes('nao encontrad') ? 404 : 400);

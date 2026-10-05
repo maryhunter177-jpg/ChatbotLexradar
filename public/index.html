@@ -1,8 +1,100 @@
 <!doctype html>
-<html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LexRadar · Bot WhatsApp</title>
-<style>body{margin:0;background:#08111f;color:#e8eef7;font:15px system-ui}main{max-width:1050px;margin:auto;padding:32px}h1{margin-bottom:4px}.muted{color:#93a4ba}.card{background:#111d2e;border:1px solid #24344a;border-radius:14px;padding:20px;margin:18px 0}input,button{border-radius:8px;border:1px solid #31445e;padding:10px;background:#0a1524;color:#fff}input{min-width:280px}button{background:#0f766e;cursor:pointer}pre{white-space:pre-wrap;overflow:auto;background:#07101c;padding:16px;border-radius:10px}.danger{color:#fbbf24}</style></head>
-<body><main><h1>LexRadar · Bot WhatsApp</h1><p class="muted">Painel operacional inicial — nenhum disparo e feito sem aprovacao e worker habilitado.</p>
-<section class="card"><label>Token administrativo <input id="token" type="password" autocomplete="off"></label> <button id="load">Atualizar estado</button><p class="danger">O token fica somente nesta aba e nao e persistido.</p></section>
-<section class="card"><h2>Estado</h2><pre id="output">Informe o token para consultar.</pre></section>
-<section class="card"><h2>Proximos controles</h2><p>As operacoes de QR, aprovacao de leads e campanhas ja estao disponiveis na API. A interface visual completa entra no proximo marco apos a definicao conjunta do fluxo de envio e da infraestrutura VPS.</p></section>
-</main><script>document.querySelector('#load').onclick=async()=>{const o=document.querySelector('#output');try{const r=await fetch('/api/status',{headers:{authorization:'Bearer '+document.querySelector('#token').value}});o.textContent=JSON.stringify(await r.json(),null,2)}catch(e){o.textContent=e.message}};</script></body></html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>LexRadar · Bot WhatsApp</title>
+  <style>
+    :root{color-scheme:dark;--bg:#07111f;--card:#111d2e;--line:#26364d;--muted:#9aacbf;--ok:#34d399;--warn:#fbbf24;--bad:#fb7185;--brand:#14b8a6}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:#edf4fc;font:15px system-ui,-apple-system,Segoe UI,sans-serif}main{max-width:1180px;margin:auto;padding:30px 20px 60px}
+    h1{margin:0 0 4px;font-size:30px}h2{margin:0 0 16px;font-size:20px}.muted{color:var(--muted)}.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;margin:18px 0}
+    .toolbar,.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}input,select,button{border-radius:8px;border:1px solid #39506e;padding:10px;background:#091625;color:#fff}input{min-width:210px}button{background:#0f766e;cursor:pointer;font-weight:650}button.secondary{background:#17263a}button.warn{background:#854d0e}button:disabled{opacity:.55;cursor:not-allowed}
+    .summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}.metric{background:#0a1626;border:1px solid var(--line);border-radius:10px;padding:14px}.metric strong{display:block;font-size:21px;margin-top:4px}
+    .pill{display:inline-flex;border-radius:999px;padding:4px 9px;font-size:12px;font-weight:750;background:#23334a}.pill.ok{color:var(--ok)}.pill.warn{color:var(--warn)}.pill.bad{color:var(--bad)}
+    .table-wrap{overflow:auto}table{width:100%;border-collapse:collapse;min-width:850px}th,td{text-align:left;border-bottom:1px solid var(--line);padding:12px 8px;vertical-align:middle}th{color:var(--muted);font-size:12px;text-transform:uppercase}.actions{display:flex;gap:6px;flex-wrap:wrap}.actions button{padding:7px 9px;font-size:12px}.limit{min-width:0;width:82px}
+    #notice{min-height:22px;margin:8px 0;color:var(--muted)}#notice.error{color:var(--bad)}#notice.success{color:var(--ok)}#qrWrap{display:none;margin-top:16px}#qr{max-width:330px;width:100%;background:white;border-radius:10px;padding:8px}
+    .empty{padding:24px;text-align:center;color:var(--muted);border:1px dashed var(--line);border-radius:10px}
+  </style>
+</head>
+<body><main>
+  <h1>LexRadar · Bot WhatsApp</h1>
+  <p class="muted">Gestão de linhas, contingência e homologação. Disparos só ocorrem quando o worker estiver habilitado.</p>
+
+  <section class="card">
+    <div class="toolbar">
+      <label>Token administrativo <input id="token" type="password" autocomplete="off"></label>
+      <button id="load">Atualizar painel</button>
+      <button id="refresh" class="secondary">Verificar conexões</button>
+    </div>
+    <p class="muted">O token permanece somente nesta aba e não é salvo.</p>
+    <div id="notice"></div>
+  </section>
+
+  <section class="summary" id="summary"></section>
+
+  <section class="card">
+    <h2>Linhas do WhatsApp</h2>
+    <div class="toolbar">
+      <input id="instanceName" placeholder="nome-da-nova-linha" maxlength="60">
+      <button id="createInstance">Adicionar linha</button>
+    </div>
+    <div id="qrWrap"><p><strong>Escaneie imediatamente:</strong></p><img id="qr" alt="QR Code da linha"></div>
+    <div class="table-wrap"><div id="instances" class="empty">Informe o token e atualize o painel.</div></div>
+  </section>
+
+  <section class="card">
+    <h2>Campanhas e roteamento</h2>
+    <div id="campaigns" class="empty">Nenhuma informação carregada.</div>
+  </section>
+</main>
+<script>
+  const $ = (selector) => document.querySelector(selector);
+  let state = null;
+  const token = () => $('#token').value.trim();
+  const esc = (value) => String(value ?? '').replace(/[&<>"']/g,(char)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+  const notice = (message, type='') => { $('#notice').textContent=message; $('#notice').className=type; };
+  async function api(path, options={}) {
+    const response = await fetch(path,{...options,headers:{authorization:'Bearer '+token(),'content-type':'application/json',...(options.headers||{})}});
+    const data = await response.json().catch(()=>({}));
+    if(!response.ok) throw new Error(data.error||`Erro HTTP ${response.status}`);
+    return data;
+  }
+  const stateLabel = (value) => ({open:'conectada',connected:'conectada',created:'aguardando QR',connecting:'conectando',unavailable:'indisponível'}[value]||value||'desconhecida');
+  function render() {
+    const instances=state?.instances||[], campaigns=state?.campaigns||[];
+    $('#summary').innerHTML=`
+      <div class="metric"><span class="muted">Evolution API</span><strong>${state?.evolutionConfigured?'Configurada':'Pendente'}</strong></div>
+      <div class="metric"><span class="muted">Linhas conectadas</span><strong>${instances.filter(i=>['open','connected'].includes(i.state)).length}/${instances.length}</strong></div>
+      <div class="metric"><span class="muted">Leads importados</span><strong>${state?.leads?.total||0}</strong></div>
+      <div class="metric"><span class="muted">Disparos</span><strong>${state?.dispatchEnabled?'Habilitados':'Desativados'}</strong></div>`;
+    $('#instances').className=instances.length?'':'empty';
+    $('#instances').innerHTML=instances.length?`<table><thead><tr><th>Linha</th><th>Conexão</th><th>Função</th><th>Limite/dia</th><th>Enviadas</th><th>Ações</th></tr></thead><tbody>${instances.map(i=>{
+      const connected=['open','connected'].includes(i.state), role=i.operationalMode||'standby';
+      return `<tr><td><strong>${esc(i.label||i.name)}</strong><br><span class="muted">${esc(i.phoneNumber?('+'+i.phoneNumber):i.name)}</span></td>
+        <td><span class="pill ${connected?'ok':i.state==='unavailable'?'bad':'warn'}">${esc(stateLabel(i.state))}</span></td>
+        <td>${role==='primary'?'Principal':role==='paused'?'Pausada':'Contingência'}</td>
+        <td><input class="limit" type="number" min="1" max="10000" value="${Number(i.dailyLimit)||50}" data-limit="${esc(i.id)}"></td>
+        <td>${Number(i.sentToday)||0}</td><td><div class="actions">
+          ${role!=='primary'?`<button data-action="primary" data-id="${esc(i.id)}">Tornar principal</button>`:''}
+          ${role==='paused'?`<button data-action="resume" data-id="${esc(i.id)}">Ativar como reserva</button>`:`<button class="warn" data-action="pause" data-id="${esc(i.id)}">Pausar</button>`}
+          <button class="secondary" data-action="limit" data-id="${esc(i.id)}">Salvar limite</button>
+          <button class="secondary" data-action="qr" data-id="${esc(i.id)}" data-name="${esc(i.name)}">Gerar QR</button>
+        </div></td></tr>`}).join('')}</tbody></table>`:'Nenhuma linha cadastrada.';
+    $('#campaigns').className=campaigns.length?'':'empty';
+    $('#campaigns').innerHTML=campaigns.length?`<div class="table-wrap"><table><thead><tr><th>Campanha</th><th>Estado</th><th>Roteamento</th><th>Execução</th></tr></thead><tbody>${campaigns.map(c=>{
+      const primary=instances.find(i=>i.id===(c.primaryInstanceId||(c.instanceIds||[])[0]));
+      return `<tr><td>${esc(c.name)}</td><td>${esc(c.status)}</td><td>Principal: ${esc(primary?.label||primary?.name||'não definida')}<br><span class="muted">Failover: ${c.failoverMode==='automatic'?'automático':'manual'}</span></td><td>${esc(c.runtimeStatus||'ready')}</td></tr>`}).join('')}</tbody></table></div>`:'Nenhuma campanha criada.';
+  }
+  async function load(message='Painel atualizado.') { state=await api('/api/status'); render(); notice(message,'success'); }
+  $('#load').onclick=()=>load().catch(e=>notice(e.message,'error'));
+  $('#refresh').onclick=async()=>{try{await api('/api/instances/refresh',{method:'POST'});await load('Conexões verificadas.')}catch(e){notice(e.message,'error')}};
+  $('#createInstance').onclick=async()=>{try{const name=$('#instanceName').value.trim();if(!name)throw new Error('Informe o nome da linha.');const created=await api('/api/instances',{method:'POST',body:JSON.stringify({name})});$('#instanceName').value='';const data=created?.evolution?.qrcode?.base64;if(data){$('#qr').src=data;$('#qrWrap').style.display='block'}await load('Linha criada. Escaneie o QR Code.')}catch(e){notice(e.message,'error')}};
+  $('#instances').onclick=async(event)=>{const button=event.target.closest('button[data-action]');if(!button)return;try{const {action,id,name}=button.dataset;
+    if(action==='primary')await api(`/api/instances/${id}/primary`,{method:'POST'});
+    if(action==='pause')await api(`/api/instances/${id}/configure`,{method:'POST',body:JSON.stringify({operationalMode:'paused'})});
+    if(action==='resume')await api(`/api/instances/${id}/configure`,{method:'POST',body:JSON.stringify({operationalMode:'standby',enabled:true})});
+    if(action==='limit'){const value=Number(document.querySelector(`[data-limit="${id}"]`).value);await api(`/api/instances/${id}/configure`,{method:'POST',body:JSON.stringify({dailyLimit:value})})}
+    if(action==='qr'){const data=await api(`/api/instances/${encodeURIComponent(name)}/qr`);const source=data.base64||data.qrcode?.base64;if(!source)throw new Error('A Evolution não retornou o QR Code.');$('#qr').src=source;$('#qrWrap').style.display='block'}
+    await load('Configuração salva.');
+  }catch(e){notice(e.message,'error')}};
+</script></body></html>
