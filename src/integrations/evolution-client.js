@@ -17,7 +17,7 @@ export class EvolutionClient {
     try {
       const response = await this.fetchImpl(`${this.baseUrl}${route}`, {
         method,
-        headers: { apikey: this.apiKey, 'content-type': 'application/json' },
+        headers: { apikey: this.apiKey, 'content-type': 'application/json', origin: 'http://127.0.0.1:3100' },
         body: body === undefined ? undefined : JSON.stringify(body),
         signal: controller.signal
       });
