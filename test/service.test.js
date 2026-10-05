@@ -101,3 +101,23 @@ test('promover uma linha para principal rebaixa a anterior para contingencia', a
     assert.equal(ctx.store.state.instances[1].operationalMode, 'primary');
   } finally { fs.rmSync(ctx.root, { recursive: true, force: true }); }
 });
+
+test('campanha de multa usa abertura padrao e nome do atendente', async () => {
+  const ctx = fixture(true);
+  try {
+    await ctx.service.addInstance('principal');
+    const instance = ctx.store.state.instances[0]; instance.state = 'open'; ctx.store.save();
+    ctx.service.importLeads([{
+      schemaVersion: 1, sourceId: 'multa-1', dataMode: 'live', phones: ['11999990003'],
+      name: 'Ana Silva', infractionDescription: 'por avançar o sinal vermelho'
+    }]);
+    const lead = ctx.store.state.leads[0]; ctx.service.setLeadPermission([lead.id], 'approved', 'Fixture');
+    const campaign = ctx.service.createCampaign({
+      name: 'Multas', messageProfile: 'infraction_first_contact', senderName: 'Mariana',
+      continuationTemplate: 'Se desejar mais informações, responda esta mensagem.', instanceIds: [instance.id]
+    });
+    ctx.service.activateCampaign(campaign.id, [lead.id]);
+    assert.equal(await ctx.service.tick(), true);
+    assert.equal(ctx.calls[0][2], 'Olá Ana, meu nome é Mariana. Identificamos através do Diário Oficial a multa por avançar o sinal vermelho.\n\nSe desejar mais informações, responda esta mensagem.');
+  } finally { fs.rmSync(ctx.root, { recursive: true, force: true }); }
+});

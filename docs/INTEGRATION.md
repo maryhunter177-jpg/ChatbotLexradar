@@ -28,5 +28,12 @@ Falhas transitorias usam backoff limitado. Falhas definitivas vao para `failed`,
 
 ## Variaveis de mensagem
 
-Disponiveis: `{{nome}}`, `{{primeiro_nome}}`, `{{classificacao}}`, `{{codigo_infracao}}`, `{{descricao_infracao}}`, `{{numero_processo}}` e `{{arquivo_origem}}`. Variaveis ausentes viram texto vazio. Variaveis desconhecidas bloqueiam a campanha.
+Disponiveis: `{{nome}}`, `{{primeiro_nome}}`, `{{nome_atendente}}`, `{{classificacao}}`, `{{codigo_infracao}}`, `{{descricao_infracao}}`, `{{numero_processo}}` e `{{arquivo_origem}}`. Variaveis ausentes viram texto vazio. Variaveis desconhecidas bloqueiam a campanha.
 
+O perfil `infraction_first_contact` possui abertura obrigatoria e protegida:
+
+```text
+Olá {{primeiro_nome}}, meu nome é {{nome_atendente}}. Identificamos através do Diário Oficial a multa {{descricao_infracao}}.
+```
+
+O nome do atendente e configurado na campanha. A continuacao pode variar por tipo de edital, mas nao substitui a abertura. Leads sem descricao da infracao nao entram na fila desse perfil.

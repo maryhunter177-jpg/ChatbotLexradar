@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { uniquePhones, maskPhone } from '../domain/phone.js';
-import { renderTemplate, validateTemplate } from '../domain/template.js';
+import { buildProfileTemplate, renderTemplate, validateTemplate } from '../domain/template.js';
 
 const nowIso = () => new Date().toISOString();
 const id = () => crypto.randomUUID();
@@ -177,7 +177,13 @@ export class BotService {
   }
 
   createCampaign(input) {
-    const template = validateTemplate(input?.template);
+    const messageProfile = input?.messageProfile || 'custom';
+    const senderName = clean(input?.senderName, 80);
+    const continuationTemplate = clean(input?.continuationTemplate, 3500);
+    if (!['custom', 'infraction_first_contact'].includes(messageProfile)) throw new Error('Perfil de mensagem desconhecido.');
+    const template = messageProfile === 'infraction_first_contact'
+      ? buildProfileTemplate(messageProfile, senderName, continuationTemplate)
+      : validateTemplate(input?.template);
     const minDelayMs = Math.max(1000, Number(input?.minDelayMs) || 30000);
     const maxDelayMs = Math.max(minDelayMs, Number(input?.maxDelayMs) || 90000);
     if (maxDelayMs > 86400000) throw new Error('Delay maximo excede 24 horas.');
@@ -194,6 +200,7 @@ export class BotService {
     if (!['manual', 'automatic'].includes(failoverMode)) throw new Error('Modo de failover invalido.');
     const campaign = {
       id: id(), name: clean(input.name, 120) || 'Campanha sem nome', template, minDelayMs, maxDelayMs,
+      messageProfile, senderName, continuationTemplate,
       instanceIds, primaryInstanceId, fallbackInstanceIds, failoverMode,
       status: 'draft', runtimeStatus: 'ready', createdAt: nowIso(), nextDispatchAt: ''
     };
@@ -209,6 +216,7 @@ export class BotService {
       const selected = new Set(Array.isArray(leadIds) ? leadIds : []);
       for (const lead of state.leads) {
         if ((selected.size && !selected.has(lead.id)) || lead.contactPermission !== 'approved') continue;
+        if (campaign.messageProfile === 'infraction_first_contact' && (lead.type !== 'infraction' || !lead.infractionDescription)) continue;
         const phone = lead.phones[0];
         const key = `${campaign.id}:${lead.id}:${phone}`;
         if (state.jobs.some((job) => job.idempotencyKey === key)) continue;
@@ -286,7 +294,7 @@ export class BotService {
     this.processing = true;
     due.status = 'sending'; due.instanceId = instance.id; due.attempts += 1; due.startedAt = nowIso(); this.store.save();
     try {
-      const message = renderTemplate(campaign.template, lead);
+      const message = renderTemplate(campaign.template, lead, { senderName: campaign.senderName });
       const response = await this.evolution.sendText(instance.name, due.phone, message);
       due.status = 'sent'; due.sentAt = nowIso(); due.providerMessageId = clean(response?.key?.id || response?.messageId, 200);
       instance.sentToday += 1; instance.lastUsedAt = nowIso();
