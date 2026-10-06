@@ -50,6 +50,7 @@ authorized_keys="${ssh_dir}/authorized_keys"
 sshd_fragment="/etc/ssh/sshd_config.d/70-lexradar-${client_id}.conf"
 
 getent group "$TUNNEL_GROUP" >/dev/null || groupadd --system "$TUNNEL_GROUP"
+install -d -m 0755 -o root -g root "$ACCOUNT_BASE"
 
 if id "$account_name" >/dev/null 2>&1; then
   actual_home="$(getent passwd "$account_name" | cut -d: -f6)"
@@ -66,7 +67,7 @@ fi
 
 # Impede senha local sem desabilitar autenticacao por chave publica.
 passwd --lock "$account_name" >/dev/null 2>&1 || true
-install -d -m 0700 -o "$account_name" -g "$TUNNEL_GROUP" "$ssh_dir"
+install -d -m 0700 -o "$account_name" -g "$TUNNEL_GROUP" "$account_home" "$ssh_dir"
 
 key_options="restrict,port-forwarding,permitopen=\"${PANEL_TARGET}\""
 temporary_key="$(mktemp "${ssh_dir}/authorized_keys.XXXXXX")"

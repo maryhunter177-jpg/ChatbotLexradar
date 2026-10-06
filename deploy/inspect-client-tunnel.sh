@@ -26,4 +26,4 @@ else
   printf 'chave: revogada\n'
 fi
 printf 'sessoes ativas: '
-pgrep -u "$account_name" sshd 2>/dev/null | wc -l
+pgrep -u "$account_name" sshd 2>/dev/null | wc -l || true
