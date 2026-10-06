@@ -6,6 +6,8 @@ A stack usa Docker Compose com Evolution API `v2.3.7`, PostgreSQL 15, Redis 7 e 
 
 ## Acesso local por tunel
 
+O comando abaixo usa a credencial administrativa de desenvolvimento e nao deve ser entregue ao cliente final. Para provisionar uma conta individual limitada exclusivamente ao painel, siga [CLIENT-TUNNEL-ACCESS.md](CLIENT-TUNNEL-ACCESS.md).
+
 ```powershell
 ssh -i "$env:USERPROFILE\.ssh\lexradar-vps" -L 3100:127.0.0.1:3100 -L 8080:127.0.0.1:8080 root@IP_DA_VPS
 ```

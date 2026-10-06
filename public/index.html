@@ -15,19 +15,44 @@
     .table-wrap{overflow:auto}table{width:100%;border-collapse:collapse;min-width:850px}th,td{text-align:left;border-bottom:1px solid var(--line);padding:12px 8px;vertical-align:middle}th{color:var(--muted);font-size:12px;text-transform:uppercase}.actions{display:flex;gap:6px;flex-wrap:wrap}.actions button{padding:7px 9px;font-size:12px}.limit{min-width:0;width:82px}
     #notice{min-height:22px;margin:8px 0;color:var(--muted)}#notice.error{color:var(--bad)}#notice.success{color:var(--ok)}#qrWrap{display:none;margin-top:16px}#qr{max-width:330px;width:100%;background:white;border-radius:10px;padding:8px}
     .empty{padding:24px;text-align:center;color:var(--muted);border:1px dashed var(--line);border-radius:10px}.preview{white-space:pre-wrap;min-height:90px;background:#07111f;border:1px solid var(--line);border-radius:10px;padding:14px}.lead-detail{margin:12px 0;padding:14px;border:1px solid var(--line);border-radius:10px;background:#0a1626}.checkbox{min-width:0;width:18px;height:18px}.compact{font-size:13px}.spacer{margin-top:14px}
+    .status-banner{display:flex;justify-content:space-between;gap:18px;align-items:center;background:#0a1626;border:1px solid var(--line);border-radius:12px;padding:16px}.status-banner strong{display:block;font-size:17px}.status-copy{margin-top:4px}.steps{counter-reset:step;display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px;margin-top:14px}.step{position:relative;padding:13px 13px 13px 47px;background:#0a1626;border:1px solid var(--line);border-radius:10px}.step:before{counter-increment:step;content:counter(step);position:absolute;left:13px;top:13px;width:24px;height:24px;display:grid;place-items:center;border-radius:999px;background:#1d3855;font-weight:800}.step.done:before{content:'\2713';background:#065f46}.step strong{display:block}.diagnostics{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:8px;margin-top:14px}.diagnostic{padding:10px 12px;border:1px solid var(--line);border-radius:9px}.diagnostic span{display:block;font-size:12px;color:var(--muted);margin-bottom:3px}.hidden{display:none!important}.auth-help{padding:12px;background:#3b2c08;border:1px solid #735b13;border-radius:9px;color:#fde68a}.metric small{display:block;margin-top:4px}.safe-note{border-left:3px solid var(--brand);padding-left:10px}
   </style>
 </head>
 <body><main>
   <h1>LexRadar · Bot WhatsApp</h1>
   <p class="muted">Painel de homologação, revisão de leads e preparação de campanhas. O envio depende da aprovação e do worker habilitado.</p>
 
+  <section class="card" aria-labelledby="homologationTitle">
+    <div class="status-banner">
+      <div>
+        <strong id="homologationTitle">Ambiente de homologação</strong>
+        <div id="homologationMessage" class="muted status-copy">Verificando o conector e a API do bot…</div>
+      </div>
+      <span id="homologationPill" class="pill warn">Verificando</span>
+    </div>
+    <div class="steps" aria-label="Etapas da homologação">
+      <div class="step" id="stepConnector"><strong>Conectar o computador</strong><span class="muted">O conector localiza o LexRadar sem modificar o programa.</span></div>
+      <div class="step" id="stepSync"><strong>Sincronizar os leads</strong><span class="muted">Somente os dados necessários são enviados ao painel.</span></div>
+      <div class="step" id="stepLine"><strong>Conferir o WhatsApp</strong><span class="muted">Valide se a linha de teste aparece como conectada.</span></div>
+      <div class="step" id="stepReview"><strong>Revisar antes de enviar</strong><span class="muted">Aprovação e prévia continuam obrigatórias.</span></div>
+    </div>
+    <div id="connectorDiagnostics" class="diagnostics hidden" aria-label="Diagnóstico do conector"></div>
+    <p class="muted compact safe-note">Este diagnóstico não exibe token, chave SSH, telefone completo, CPF, placa ou outros dados sensíveis.</p>
+  </section>
+
   <section class="card">
-    <div class="toolbar">
+    <div class="toolbar" id="authControls">
       <label>Token administrativo <input id="token" type="password" autocomplete="off"></label>
       <button id="load">Atualizar painel</button>
       <button id="refresh" class="secondary">Verificar conexões</button>
     </div>
-    <p class="muted">O token permanece somente na memória desta aba e não é salvo.</p>
+    <div id="connectorControls" class="toolbar hidden">
+      <button id="connectorLoad">Atualizar painel</button>
+      <button id="connectorRefresh" class="secondary">Verificar conexões</button>
+      <span class="pill ok">Acesso protegido pelo conector</span>
+    </div>
+    <p id="tokenPrivacy" class="muted">O token permanece somente na memória desta aba e não é salvo.</p>
+    <p id="authHelp" class="auth-help">Para começar, cole o token administrativo fornecido para esta homologação e clique em “Atualizar painel”.</p>
     <div id="notice" role="status" aria-live="polite"></div>
   </section>
 
@@ -92,13 +117,17 @@
   const $ = (selector) => document.querySelector(selector);
   let state = null;
   let leads = [];
+  let connector = null;
+  let connectorMode = false;
   const selectedLeadIds = new Set();
   const token = () => $('#token').value.trim();
   const esc = (value) => String(value ?? '').replace(/[&<>"']/g,(char)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
   const notice = (message, type='') => { $('#notice').textContent=message; $('#notice').className=type; };
   async function api(path, options={}) {
-    if (!token()) throw new Error('Informe o token administrativo.');
-    const response = await fetch(path,{...options,headers:{authorization:'Bearer '+token(),'content-type':'application/json',...(options.headers||{})}});
+    if (!connectorMode && !token()) throw new Error('Informe o token administrativo para carregar os dados.');
+    const headers={'content-type':'application/json',...(options.headers||{})};
+    if(token()) headers.authorization='Bearer '+token();
+    const response = await fetch(path,{...options,headers});
     const data = await response.json().catch(()=>({}));
     if(!response.ok) throw new Error(data.error||`Erro HTTP ${response.status}`);
     return data;
@@ -107,14 +136,81 @@
   const permissionLabel = (value) => ({approved:'aprovado',blocked:'bloqueado',pending_review:'em revisão'}[value]||value||'em revisão');
   const selected = () => leads.filter((lead)=>selectedLeadIds.has(lead.id));
 
+  const connectorValue = (...keys) => {
+    for (const key of keys) if (connector?.[key] !== undefined) return connector[key];
+    return undefined;
+  };
+  const yesNo = (value) => value === true ? 'Sim' : value === false ? 'Não' : 'Não informado';
+  const safeDate = (value) => {
+    if(!value) return 'Ainda não ocorreu';
+    const date=new Date(value); return Number.isNaN(date.getTime())?'Não informado':date.toLocaleString('pt-BR');
+  };
+
+  function renderOnboarding() {
+    const connectedInstances=(state?.instances||[]).filter(i=>['open','connected'].includes(i.state)).length;
+    const connectorReady=connectorMode && connectorValue('ready','connected','tunnelConnected') !== false;
+    const synchronized=Boolean(state?.lexradarIntegration?.synchronized);
+    $('#stepConnector').classList.toggle('done',connectorReady);
+    $('#stepSync').classList.toggle('done',synchronized);
+    $('#stepLine').classList.toggle('done',connectedInstances>0);
+    $('#stepReview').classList.toggle('done',Number(state?.leads?.byPermission?.approved||0)>0);
+    const dispatch=Boolean(state?.dispatchEnabled);
+    const pill=$('#homologationPill');
+    pill.className=`pill ${dispatch?'bad':state?'ok':'warn'}`;
+    pill.textContent=dispatch?'Envios habilitados':state?'Homologação segura':'Aguardando acesso';
+    $('#homologationMessage').textContent=dispatch
+      ? 'Atenção: o worker de envio está habilitado. Revise campanhas e permissões antes de continuar.'
+      : state
+        ? 'Painel conectado. O worker está desligado e nenhuma mensagem será enviada automaticamente.'
+        : connectorMode
+          ? 'Conector encontrado. Carregando o estado seguro do bot…'
+          : 'Informe o token de homologação para consultar o bot. Nenhum envio ocorre nesta etapa.';
+    if(connectorMode){
+      const baseDetected=connectorValue('lexradarDetected','baseDetected','databaseDetected');
+      const tunnel=connectorValue('tunnelConnected','apiConnected','connected','ready');
+      const last=connectorValue('lastSyncAt','lastSynchronizationAt')||state?.lexradarIntegration?.lastSyncAt;
+      const count=connectorValue('eligibleCount','leadCount','recordsFound');
+      const version=connectorValue('connectorVersion');
+      const diagnostics=[
+        ['LexRadar detectado',yesNo(baseDetected)],
+        ['Conexão segura',yesNo(tunnel)],
+        ['Última sincronização',safeDate(last)],
+        ['Registros preparados',Number.isFinite(Number(count))?String(Number(count)):'Não informado'],
+        ['Versão do conector',version?String(version):'Não informada']
+      ];
+      $('#connectorDiagnostics').innerHTML=diagnostics.map(([label,value])=>`<div class="diagnostic"><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`).join('');
+      $('#connectorDiagnostics').classList.remove('hidden');
+    } else $('#connectorDiagnostics').classList.add('hidden');
+  }
+
+  async function detectConnector() {
+    try {
+      const response=await fetch('/connector/status',{headers:{accept:'application/json'},cache:'no-store'});
+      if(!response.ok)return false;
+      connector=await response.json(); connectorMode=true;
+      $('#authControls').classList.add('hidden');
+      $('#connectorControls').classList.remove('hidden');
+      $('#authHelp').classList.add('hidden');
+      $('#tokenPrivacy').classList.add('hidden');
+      renderOnboarding();
+      return true;
+    } catch { return false; }
+  }
+
   function renderSummary() {
     const instances=state?.instances||[];
+    const permissions=state?.leads?.byPermission||{};
+    const queued=Number(state?.jobs?.queued)||0;
     $('#summary').innerHTML=`
       <div class="metric"><span class="muted">Evolution API</span><strong>${state?.evolutionConfigured?'Configurada':'Pendente'}</strong></div>
       <div class="metric"><span class="muted">Integração LexRadar</span><strong>${state?.lexradarIntegration?.synchronized?'Sincronizada':'Aguardando'}</strong>${state?.lexradarIntegration?.lastSyncAt?`<small class="muted">${esc(new Date(state.lexradarIntegration.lastSyncAt).toLocaleString('pt-BR'))}</small>`:''}</div>
       <div class="metric"><span class="muted">Linhas conectadas</span><strong>${instances.filter(i=>['open','connected'].includes(i.state)).length}/${instances.length}</strong></div>
       <div class="metric"><span class="muted">Leads importados</span><strong>${Number(state?.leads?.total)||0}</strong></div>
-      <div class="metric"><span class="muted">Disparos</span><strong>${state?.dispatchEnabled?'Habilitados':'Desativados'}</strong></div>`;
+      <div class="metric"><span class="muted">Em revisão</span><strong>${Number(permissions.pending_review)||0}</strong></div>
+      <div class="metric"><span class="muted">Aprovados</span><strong>${Number(permissions.approved)||0}</strong></div>
+      <div class="metric"><span class="muted">Na fila</span><strong>${queued}</strong></div>
+      <div class="metric"><span class="muted">Worker de envio</span><strong class="${state?.dispatchEnabled?'':'muted'}">${state?.dispatchEnabled?'Habilitado':'Desligado'}</strong></div>`;
+    renderOnboarding();
   }
 
   function renderInstances() {
@@ -164,7 +260,7 @@
       <td>${esc(lead.infractionDescription||lead.processNumber||'Não informada')}</td>
       <td>${esc((lead.phones||[]).join(', ')||'Não informado')}</td>
       <td><span class="pill ${lead.contactPermission==='approved'?'ok':lead.contactPermission==='blocked'?'bad':'warn'}">${esc(permissionLabel(lead.contactPermission))}</span></td>
-      <td>${esc(lead.sourceId||lead.sourceKey||'')}</td></tr>`).join('')}</tbody></table>`:'Nenhum lead importado do LexRadar.';
+      <td>${esc(lead.sourceId||lead.sourceKey||'')}</td></tr>`).join('')}</tbody></table>`:'Nenhum lead sincronizado ainda. Abra o LexRadar, mantenha o conector ativo e aguarde a primeira sincronização.';
     renderLeadDetail();
   }
 
@@ -193,6 +289,10 @@
 
   $('#load').onclick=()=>load().catch(e=>notice(e.message,'error'));
   $('#refresh').onclick=async()=>{try{await api('/api/instances/refresh',{method:'POST'});await load('Conexões verificadas.')}catch(e){notice(e.message,'error')}};
+  $('#connectorLoad').onclick=async()=>{try{await detectConnector();await load('Conector e painel atualizados.')}catch(e){notice(e.message,'error')}};
+  $('#connectorRefresh').onclick=()=>$('#refresh').click();
+  $('#token').addEventListener('input',()=>$('#authHelp').classList.toggle('hidden',Boolean(token())));
+  $('#token').addEventListener('keydown',(event)=>{if(event.key==='Enter')$('#load').click()});
   $('#createInstance').onclick=async()=>{try{const name=$('#instanceName').value.trim();if(!name)throw new Error('Informe o nome da linha.');const created=await api('/api/instances',{method:'POST',body:JSON.stringify({name})});$('#instanceName').value='';const data=created?.evolution?.qrcode?.base64;if(data){$('#qr').src=data;$('#qrWrap').style.display='block'}await load('Linha criada. Escaneie o QR Code.')}catch(e){notice(e.message,'error')}};
   $('#instances').onclick=async(event)=>{const button=event.target.closest('button[data-action]');if(!button)return;try{const {action,id,name}=button.dataset;
     if(action==='primary')await api(`/api/instances/${encodeURIComponent(id)}/primary`,{method:'POST'});
@@ -219,4 +319,6 @@
     await load('Campanha criada em rascunho. Revise e ative com os leads selecionados.');
   }catch(e){notice(e.message,'error')}};
   $('#campaigns').onclick=async(event)=>{const button=event.target.closest('button[data-campaign-action="activate"]');if(!button)return;try{const leadIds=[...selectedLeadIds];if(!leadIds.length)throw new Error('Selecione os leads aprovados que entrarão na campanha.');if(!confirm(`Ativar esta campanha com ${leadIds.length} lead(s) selecionado(s)?`))return;await api(`/api/campaigns/${encodeURIComponent(button.dataset.id)}/activate`,{method:'POST',body:JSON.stringify({leadIds})});await load('Campanha ativada e fila preparada.')}catch(e){notice(e.message,'error')}};
+  renderOnboarding();
+  detectConnector().then((found)=>{if(found)load('Conector local reconhecido. Painel atualizado.').catch(e=>notice(e.message,'error'))});
 </script></body></html>

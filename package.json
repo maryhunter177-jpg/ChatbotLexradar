@@ -11,7 +11,7 @@
     "bridge": "node src/bridge.js",
     "bridge:check": "node src/bridge.js --dry-run",
     "test": "node --test",
-    "check": "node --check src/server.js && node --check src/bridge.js"
+    "check": "node --check src/server.js && node --check src/bridge.js && node --check client/connector-proxy.js"
   },
   "license": "UNLICENSED"
 }
