@@ -50,3 +50,26 @@ test('rotas administrativas configuram linha principal e contingencia', async (t
   assert.equal((await fetch(`${base}/api/instances/i2/configure`, { method: 'POST', headers, body: JSON.stringify({ operationalMode: 'paused' }) })).status, 200);
   assert.deepEqual(calls, [['primary', 'i2'], ['configure', 'i2', { operationalMode: 'paused' }]]);
 });
+
+test('rota administrativa gera previa sem disparar mensagem', async (t) => {
+  const calls = [];
+  const service = {
+    previewMessage: (...args) => {
+      calls.push(args);
+      return { leadId: args[0], messageProfile: 'infraction_first_contact', message: 'Mensagem pronta' };
+    },
+    recordWebhook: () => ({ duplicate: false })
+  };
+  const config = { adminToken: 'admin-secret', bridgeToken: 'bridge-secret', evolutionWebhookSecret: 'hook-secret' };
+  const server = http.createServer(createHandler({ service, config }));
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => server.close());
+  const response = await fetch(`http://127.0.0.1:${server.address().port}/api/messages/preview`, {
+    method: 'POST',
+    headers: { authorization: 'Bearer admin-secret', 'content-type': 'application/json' },
+    body: JSON.stringify({ leadId: 'lead-1', senderName: 'Mariana', continuationTemplate: 'Continuacao' })
+  });
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).message, 'Mensagem pronta');
+  assert.deepEqual(calls, [['lead-1', 'Mariana', 'Continuacao']]);
+});

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 function initialState() {
-  return { schemaVersion: 1, revision: 0, instances: [], leads: [], campaigns: [], jobs: [], webhookEvents: [], audit: [] };
+  return { schemaVersion: 1, revision: 0, instances: [], leads: [], campaigns: [], jobs: [], webhookEvents: [], suppressedPhones: [], audit: [] };
 }
 
 export class JsonStore {

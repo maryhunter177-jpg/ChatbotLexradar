@@ -1,6 +1,8 @@
 import crypto from 'node:crypto';
 import { uniquePhones, maskPhone } from '../domain/phone.js';
 import { buildProfileTemplate, renderTemplate, validateTemplate } from '../domain/template.js';
+import { isOptOutMessage, normalizeInboundEvent } from '../domain/inbound.js';
+import { isWithinDeliverySchedule, normalizeDeliverySchedule } from '../domain/schedule.js';
 
 const nowIso = () => new Date().toISOString();
 const id = () => crypto.randomUUID();
@@ -13,6 +15,12 @@ function audit(state, action, details = {}) {
 
 function publicLead(lead) {
   return { ...lead, phones: lead.phones.map(maskPhone) };
+}
+
+function assertInfractionLeadReady(lead) {
+  if (lead.type !== 'infraction') throw new Error('O perfil de primeiro contato exige um lead de multa.');
+  if (!clean(lead.name, 200)) throw new Error('O lead precisa ter nome para gerar a mensagem.');
+  if (!clean(lead.infractionDescription, 500)) throw new Error('O lead precisa ter a descricao da multa.');
 }
 
 function instanceDefaults(instance, index = 0) {
@@ -58,6 +66,7 @@ export class BotService {
       leads: { total: state.leads.length, byPermission: counts(state.leads, 'contactPermission') },
       campaigns: state.campaigns,
       jobs: counts(state.jobs, 'status'),
+      suppressedPhones: state.suppressedPhones.length,
       recentAudit: state.audit.slice(0, 25)
     };
   }
@@ -81,8 +90,19 @@ export class BotService {
           infractionDescription: clean(item.infractionDescription, 500), processNumber: clean(item.processNumber, 100),
           sourceFile: clean(item.sourceFile, 260), sourceUpdatedAt: clean(item.sourceUpdatedAt, 50), dataMode: 'live', updatedAt: nowIso()
         };
-        if (existing) { Object.assign(existing, common); updated += 1; }
-        else { state.leads.push({ id: id(), ...common, contactPermission: 'pending_review', permissionReason: '', createdAt: nowIso() }); inserted += 1; }
+        const suppressed = phones.some((phone) => state.suppressedPhones.includes(phone));
+        if (existing) {
+          Object.assign(existing, common);
+          if (suppressed) { existing.contactPermission = 'blocked'; existing.permissionReason = 'Descadastro solicitado pelo telefone.'; }
+          updated += 1;
+        } else {
+          state.leads.push({
+            id: id(), ...common,
+            contactPermission: suppressed ? 'blocked' : 'pending_review',
+            permissionReason: suppressed ? 'Descadastro solicitado pelo telefone.' : '', createdAt: nowIso()
+          });
+          inserted += 1;
+        }
       }
       audit(state, 'leads.imported', { inserted, updated, ignored });
     });
@@ -94,10 +114,26 @@ export class BotService {
     if (!Array.isArray(ids) || !ids.length) throw new Error('Selecione ao menos um lead.');
     let changed = 0;
     this.store.update((state) => {
+      if (permission === 'approved' && state.leads.some((lead) => ids.includes(lead.id) && lead.phones.some((phone) => state.suppressedPhones.includes(phone)))) throw new Error('Lead com descadastro nao pode ser aprovado.');
       for (const lead of state.leads) if (ids.includes(lead.id)) { lead.contactPermission = permission; lead.permissionReason = clean(reason, 500); lead.permissionUpdatedAt = nowIso(); changed += 1; }
       audit(state, 'leads.permission-changed', { permission, changed });
     });
     return { changed };
+  }
+
+  previewMessage(leadId, senderName, continuationTemplate = '') {
+    const lead = this.store.state.leads.find((item) => item.id === leadId);
+    if (!lead) throw new Error('Lead nao encontrado.');
+    assertInfractionLeadReady(lead);
+    const template = buildProfileTemplate('infraction_first_contact', senderName, continuationTemplate);
+    const message = renderTemplate(template, lead, { senderName: clean(senderName, 80) });
+    return {
+      leadId: lead.id,
+      messageProfile: 'infraction_first_contact',
+      template,
+      message,
+      characterCount: message.length
+    };
   }
 
   async addInstance(name) {
@@ -179,7 +215,9 @@ export class BotService {
   createCampaign(input) {
     const messageProfile = input?.messageProfile || 'custom';
     const senderName = clean(input?.senderName, 80);
-    const continuationTemplate = clean(input?.continuationTemplate, 3500);
+    const rawContinuationTemplate = String(input?.continuationTemplate || '').trim();
+    if (rawContinuationTemplate.length > 3500) throw new Error('A continuacao excede 3500 caracteres.');
+    const continuationTemplate = rawContinuationTemplate;
     if (!['custom', 'infraction_first_contact'].includes(messageProfile)) throw new Error('Perfil de mensagem desconhecido.');
     const template = messageProfile === 'infraction_first_contact'
       ? buildProfileTemplate(messageProfile, senderName, continuationTemplate)
@@ -198,10 +236,12 @@ export class BotService {
     if (fallbackInstanceIds.includes(primaryInstanceId) || fallbackInstanceIds.some((value) => !instanceIds.includes(value))) throw new Error('Contingencia invalida.');
     const failoverMode = input?.failoverMode || 'manual';
     if (!['manual', 'automatic'].includes(failoverMode)) throw new Error('Modo de failover invalido.');
+    const deliverySchedule = normalizeDeliverySchedule(input?.deliverySchedule || { enabled: false });
     const campaign = {
       id: id(), name: clean(input.name, 120) || 'Campanha sem nome', template, minDelayMs, maxDelayMs,
       messageProfile, senderName, continuationTemplate,
       instanceIds, primaryInstanceId, fallbackInstanceIds, failoverMode,
+      deliverySchedule,
       status: 'draft', runtimeStatus: 'ready', createdAt: nowIso(), nextDispatchAt: ''
     };
     this.store.update((state) => { state.campaigns.push(campaign); audit(state, 'campaign.created', { campaignId: campaign.id }); });
@@ -216,11 +256,18 @@ export class BotService {
       const selected = new Set(Array.isArray(leadIds) ? leadIds : []);
       for (const lead of state.leads) {
         if ((selected.size && !selected.has(lead.id)) || lead.contactPermission !== 'approved') continue;
-        if (campaign.messageProfile === 'infraction_first_contact' && (lead.type !== 'infraction' || !lead.infractionDescription)) continue;
+        if (campaign.messageProfile === 'infraction_first_contact') {
+          try { assertInfractionLeadReady(lead); } catch { continue; }
+        }
         const phone = lead.phones[0];
         const key = `${campaign.id}:${lead.id}:${phone}`;
         if (state.jobs.some((job) => job.idempotencyKey === key)) continue;
-        state.jobs.push({ id: id(), idempotencyKey: key, campaignId: campaign.id, leadId: lead.id, phone, status: 'queued', attempts: 0, availableAt: nowIso(), createdAt: nowIso() });
+        const message = renderTemplate(campaign.template, lead, { senderName: campaign.senderName });
+        state.jobs.push({
+          id: id(), idempotencyKey: key, campaignId: campaign.id, leadId: lead.id, phone,
+          message, messageProfile: campaign.messageProfile,
+          status: 'queued', attempts: 0, availableAt: nowIso(), createdAt: nowIso()
+        });
         created += 1;
       }
       if (!created) throw new Error('Nenhum lead aprovado e inedito foi selecionado.');
@@ -274,10 +321,24 @@ export class BotService {
 
   async tick() {
     if (this.processing || !this.dispatchEnabled) return false;
-    const due = this.store.state.jobs.find((job) => job.status === 'queued' && new Date(job.availableAt).getTime() <= Date.now());
-    if (!due) return false;
-    const campaign = this.store.state.campaigns.find((item) => item.id === due.campaignId);
-    if (!campaign || campaign.status !== 'active' || (campaign.nextDispatchAt && new Date(campaign.nextDispatchAt).getTime() > Date.now())) return false;
+    const current = new Date();
+    let due; let campaign; let stateChanged = false;
+    for (const job of this.store.state.jobs) {
+      if (job.status !== 'queued' || new Date(job.availableAt).getTime() > current.getTime()) continue;
+      const candidate = this.store.state.campaigns.find((item) => item.id === job.campaignId);
+      if (!candidate || candidate.status !== 'active' || (candidate.nextDispatchAt && new Date(candidate.nextDispatchAt).getTime() > current.getTime())) continue;
+      if (!isWithinDeliverySchedule(current, candidate.deliverySchedule || { enabled: false })) {
+        if (candidate.runtimeStatus !== 'waiting_schedule') {
+          candidate.runtimeStatus = 'waiting_schedule';
+          audit(this.store.state, 'campaign.waiting-schedule', { campaignId: candidate.id });
+          stateChanged = true;
+        }
+        continue;
+      }
+      due = job; campaign = candidate; break;
+    }
+    if (stateChanged) this.store.save();
+    if (!due || !campaign) return false;
     const lead = this.store.state.leads.find((item) => item.id === due.leadId);
     if (!lead || lead.contactPermission !== 'approved') { due.status = 'blocked'; due.error = 'Lead sem permissao vigente.'; this.store.save(); return true; }
     const route = this.chooseInstance(campaign);
@@ -294,7 +355,7 @@ export class BotService {
     this.processing = true;
     due.status = 'sending'; due.instanceId = instance.id; due.attempts += 1; due.startedAt = nowIso(); this.store.save();
     try {
-      const message = renderTemplate(campaign.template, lead, { senderName: campaign.senderName });
+      const message = due.message || renderTemplate(campaign.template, lead, { senderName: campaign.senderName });
       const response = await this.evolution.sendText(instance.name, due.phone, message);
       due.status = 'sent'; due.sentAt = nowIso(); due.providerMessageId = clean(response?.key?.id || response?.messageId, 200);
       instance.sentToday += 1; instance.lastUsedAt = nowIso();
@@ -314,11 +375,25 @@ export class BotService {
   recordWebhook(raw, event) {
     const eventId = crypto.createHash('sha256').update(raw).digest('hex');
     if (this.store.state.webhookEvents.some((item) => item.id === eventId)) return { duplicate: true };
+    let optOut = null;
     this.store.update((state) => {
       state.webhookEvents.unshift({ id: eventId, at: nowIso(), event: clean(event?.event, 100), instance: clean(event?.instance, 100) });
       state.webhookEvents = state.webhookEvents.slice(0, 5000);
       audit(state, 'webhook.received', { eventId, event: clean(event?.event, 100) });
+      const inbound = normalizeInboundEvent(event);
+      if (inbound && isOptOutMessage(inbound.body)) {
+        if (!state.suppressedPhones.includes(inbound.phone)) state.suppressedPhones.push(inbound.phone);
+        let leadsBlocked = 0; let jobsCancelled = 0;
+        for (const lead of state.leads) {
+          if (!lead.phones.includes(inbound.phone)) continue;
+          lead.contactPermission = 'blocked'; lead.permissionReason = 'Descadastro solicitado pelo WhatsApp.'; lead.optOutAt = nowIso();
+          leadsBlocked += 1;
+          for (const job of state.jobs) if (job.leadId === lead.id && job.status === 'queued') { job.status = 'cancelled'; job.error = 'Descadastro solicitado antes do envio.'; jobsCancelled += 1; }
+        }
+        optOut = { phone: maskPhone(inbound.phone), leadsBlocked, jobsCancelled };
+        audit(state, 'contact.opted-out', { phone: maskPhone(inbound.phone), leadsBlocked, jobsCancelled });
+      }
     });
-    return { duplicate: false };
+    return { duplicate: false, optOut };
   }
 }

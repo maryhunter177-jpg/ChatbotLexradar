@@ -9,6 +9,7 @@
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "bridge": "node src/bridge.js",
+    "bridge:check": "node src/bridge.js --dry-run",
     "test": "node --test",
     "check": "node --check src/server.js && node --check src/bridge.js"
   },

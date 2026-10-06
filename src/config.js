@@ -38,6 +38,9 @@ export function getConfig() {
     httpTimeoutMs: integer('HTTP_TIMEOUT_MS', 15000, 1000, 120000),
     lexradarStatePath: path.resolve(process.env.LEXRADAR_STATE_PATH || 'D:\\LexRadar-Dados\\data\\lexradar-data.json'),
     botRemoteUrl: String(process.env.BOT_REMOTE_URL || 'http://127.0.0.1:3100').replace(/\/+$/, ''),
-    bridgeIntervalMs: integer('BRIDGE_INTERVAL_MS', 30000, 5000, 3600000)
+    bridgeIntervalMs: integer('BRIDGE_INTERVAL_MS', 30000, 5000, 3600000),
+    bridgeMaxStateBytes: integer('BRIDGE_MAX_STATE_BYTES', 50 * 1024 * 1024, 1024, 250 * 1024 * 1024),
+    bridgeMaxLeads: integer('BRIDGE_MAX_LEADS', 10000, 1, 100000),
+    bridgeAllowRemote: /^true$/i.test(process.env.BRIDGE_ALLOW_REMOTE || 'false')
   });
 }

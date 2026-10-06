@@ -6,19 +6,20 @@
   <title>LexRadar · Bot WhatsApp</title>
   <style>
     :root{color-scheme:dark;--bg:#07111f;--card:#111d2e;--line:#26364d;--muted:#9aacbf;--ok:#34d399;--warn:#fbbf24;--bad:#fb7185;--brand:#14b8a6}
-    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:#edf4fc;font:15px system-ui,-apple-system,Segoe UI,sans-serif}main{max-width:1180px;margin:auto;padding:30px 20px 60px}
-    h1{margin:0 0 4px;font-size:30px}h2{margin:0 0 16px;font-size:20px}.muted{color:var(--muted)}.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;margin:18px 0}
-    .toolbar,.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}input,select,button{border-radius:8px;border:1px solid #39506e;padding:10px;background:#091625;color:#fff}input{min-width:210px}button{background:#0f766e;cursor:pointer;font-weight:650}button.secondary{background:#17263a}button.warn{background:#854d0e}button:disabled{opacity:.55;cursor:not-allowed}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:#edf4fc;font:15px system-ui,-apple-system,Segoe UI,sans-serif}main{max-width:1220px;margin:auto;padding:30px 20px 60px}
+    h1{margin:0 0 4px;font-size:30px}h2{margin:0 0 16px;font-size:20px}h3{margin:0 0 10px;font-size:16px}.muted{color:var(--muted)}.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;margin:18px 0}
+    .toolbar,.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px}.field{display:flex;flex-direction:column;gap:6px}.field.full{grid-column:1/-1}
+    input,select,textarea,button{border-radius:8px;border:1px solid #39506e;padding:10px;background:#091625;color:#fff;font:inherit}input,select{min-width:210px}textarea{width:100%;min-height:92px;resize:vertical}button{background:#0f766e;cursor:pointer;font-weight:650}button.secondary{background:#17263a}button.warn{background:#854d0e}button.danger{background:#9f1239}button:disabled{opacity:.55;cursor:not-allowed}
     .summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}.metric{background:#0a1626;border:1px solid var(--line);border-radius:10px;padding:14px}.metric strong{display:block;font-size:21px;margin-top:4px}
     .pill{display:inline-flex;border-radius:999px;padding:4px 9px;font-size:12px;font-weight:750;background:#23334a}.pill.ok{color:var(--ok)}.pill.warn{color:var(--warn)}.pill.bad{color:var(--bad)}
     .table-wrap{overflow:auto}table{width:100%;border-collapse:collapse;min-width:850px}th,td{text-align:left;border-bottom:1px solid var(--line);padding:12px 8px;vertical-align:middle}th{color:var(--muted);font-size:12px;text-transform:uppercase}.actions{display:flex;gap:6px;flex-wrap:wrap}.actions button{padding:7px 9px;font-size:12px}.limit{min-width:0;width:82px}
     #notice{min-height:22px;margin:8px 0;color:var(--muted)}#notice.error{color:var(--bad)}#notice.success{color:var(--ok)}#qrWrap{display:none;margin-top:16px}#qr{max-width:330px;width:100%;background:white;border-radius:10px;padding:8px}
-    .empty{padding:24px;text-align:center;color:var(--muted);border:1px dashed var(--line);border-radius:10px}
+    .empty{padding:24px;text-align:center;color:var(--muted);border:1px dashed var(--line);border-radius:10px}.preview{white-space:pre-wrap;min-height:90px;background:#07111f;border:1px solid var(--line);border-radius:10px;padding:14px}.lead-detail{margin:12px 0;padding:14px;border:1px solid var(--line);border-radius:10px;background:#0a1626}.checkbox{min-width:0;width:18px;height:18px}.compact{font-size:13px}.spacer{margin-top:14px}
   </style>
 </head>
 <body><main>
   <h1>LexRadar · Bot WhatsApp</h1>
-  <p class="muted">Gestão de linhas, contingência e homologação. Disparos só ocorrem quando o worker estiver habilitado.</p>
+  <p class="muted">Painel de homologação, revisão de leads e preparação de campanhas. O envio depende da aprovação e do worker habilitado.</p>
 
   <section class="card">
     <div class="toolbar">
@@ -26,8 +27,8 @@
       <button id="load">Atualizar painel</button>
       <button id="refresh" class="secondary">Verificar conexões</button>
     </div>
-    <p class="muted">O token permanece somente nesta aba e não é salvo.</p>
-    <div id="notice"></div>
+    <p class="muted">O token permanece somente na memória desta aba e não é salvo.</p>
+    <div id="notice" role="status" aria-live="polite"></div>
   </section>
 
   <section class="summary" id="summary"></section>
@@ -43,30 +44,80 @@
   </section>
 
   <section class="card">
+    <h2>Leads do LexRadar</h2>
+    <div class="toolbar">
+      <button id="selectAll" class="secondary">Selecionar visíveis</button>
+      <button id="clearSelection" class="secondary">Limpar seleção</button>
+      <input id="permissionReason" placeholder="Motivo da revisão" maxlength="500">
+      <button id="approveLeads">Aprovar</button>
+      <button id="reviewLeads" class="warn">Voltar para revisão</button>
+      <button id="blockLeads" class="danger">Bloquear</button>
+    </div>
+    <p id="selectionInfo" class="muted">Nenhum lead selecionado.</p>
+    <div id="leadDetail" class="lead-detail muted">Selecione um lead para revisar os dados e gerar a prévia.</div>
+    <div class="table-wrap"><div id="leads" class="empty">Nenhum lead carregado.</div></div>
+  </section>
+
+  <section class="card">
+    <h2>Mensagem e campanha</h2>
+    <div class="grid">
+      <label class="field">Nome da campanha<input id="campaignName" maxlength="120" placeholder="Ex.: Multas outubro"></label>
+      <label class="field">Nome do atendente<input id="senderName" maxlength="80" placeholder="Nome que substituirá XX"></label>
+      <label class="field">Linha principal<select id="primaryInstance"></select></label>
+      <label class="field">Contingência<select id="fallbackInstances" multiple size="3"></select></label>
+      <label class="field">Failover<select id="failoverMode"><option value="manual">Manual</option><option value="automatic">Automático</option></select></label>
+      <label class="field">Intervalo mínimo (segundos)<input id="minDelay" type="number" min="1" max="86400" value="30"></label>
+      <label class="field">Intervalo máximo (segundos)<input id="maxDelay" type="number" min="1" max="86400" value="90"></label>
+      <label class="field">Janela de envio<select id="scheduleEnabled"><option value="true">Segunda a sexta</option><option value="false">Sem restrição de horário</option></select></label>
+      <label class="field">Início da janela<input id="scheduleStart" type="time" value="09:00"></label>
+      <label class="field">Fim da janela<input id="scheduleEnd" type="time" value="18:00"></label>
+      <label class="field full">Continuação da mensagem<textarea id="continuation" maxlength="3500" placeholder="Texto exibido depois da abertura obrigatória"></textarea></label>
+    </div>
+    <p class="muted compact">Abertura fixa: Olá {PRIMEIRO NOME}, meu nome é {ATENDENTE}. Identificamos através do Diário Oficial a multa {DESCRIÇÃO DA MULTA}.</p>
+    <div class="toolbar spacer">
+      <button id="previewMessage" class="secondary">Gerar prévia do lead selecionado</button>
+      <button id="createCampaign">Criar campanha em rascunho</button>
+    </div>
+    <h3 class="spacer">Prévia</h3>
+    <div id="messagePreview" class="preview muted">Selecione exatamente um lead e clique em “Gerar prévia”.</div>
+  </section>
+
+  <section class="card">
     <h2>Campanhas e roteamento</h2>
+    <p class="muted">A ativação cria a fila somente para os leads selecionados e aprovados.</p>
     <div id="campaigns" class="empty">Nenhuma informação carregada.</div>
   </section>
 </main>
 <script>
   const $ = (selector) => document.querySelector(selector);
   let state = null;
+  let leads = [];
+  const selectedLeadIds = new Set();
   const token = () => $('#token').value.trim();
   const esc = (value) => String(value ?? '').replace(/[&<>"']/g,(char)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
   const notice = (message, type='') => { $('#notice').textContent=message; $('#notice').className=type; };
   async function api(path, options={}) {
+    if (!token()) throw new Error('Informe o token administrativo.');
     const response = await fetch(path,{...options,headers:{authorization:'Bearer '+token(),'content-type':'application/json',...(options.headers||{})}});
     const data = await response.json().catch(()=>({}));
     if(!response.ok) throw new Error(data.error||`Erro HTTP ${response.status}`);
     return data;
   }
   const stateLabel = (value) => ({open:'conectada',connected:'conectada',created:'aguardando QR',connecting:'conectando',unavailable:'indisponível'}[value]||value||'desconhecida');
-  function render() {
-    const instances=state?.instances||[], campaigns=state?.campaigns||[];
+  const permissionLabel = (value) => ({approved:'aprovado',blocked:'bloqueado',pending_review:'em revisão'}[value]||value||'em revisão');
+  const selected = () => leads.filter((lead)=>selectedLeadIds.has(lead.id));
+
+  function renderSummary() {
+    const instances=state?.instances||[];
     $('#summary').innerHTML=`
       <div class="metric"><span class="muted">Evolution API</span><strong>${state?.evolutionConfigured?'Configurada':'Pendente'}</strong></div>
       <div class="metric"><span class="muted">Linhas conectadas</span><strong>${instances.filter(i=>['open','connected'].includes(i.state)).length}/${instances.length}</strong></div>
-      <div class="metric"><span class="muted">Leads importados</span><strong>${state?.leads?.total||0}</strong></div>
+      <div class="metric"><span class="muted">Leads importados</span><strong>${Number(state?.leads?.total)||0}</strong></div>
       <div class="metric"><span class="muted">Disparos</span><strong>${state?.dispatchEnabled?'Habilitados':'Desativados'}</strong></div>`;
+  }
+
+  function renderInstances() {
+    const instances=state?.instances||[];
     $('#instances').className=instances.length?'':'empty';
     $('#instances').innerHTML=instances.length?`<table><thead><tr><th>Linha</th><th>Conexão</th><th>Função</th><th>Limite/dia</th><th>Enviadas</th><th>Ações</th></tr></thead><tbody>${instances.map(i=>{
       const connected=['open','connected'].includes(i.state), role=i.operationalMode||'standby';
@@ -80,21 +131,91 @@
           <button class="secondary" data-action="limit" data-id="${esc(i.id)}">Salvar limite</button>
           <button class="secondary" data-action="qr" data-id="${esc(i.id)}" data-name="${esc(i.name)}">Gerar QR</button>
         </div></td></tr>`}).join('')}</tbody></table>`:'Nenhuma linha cadastrada.';
-    $('#campaigns').className=campaigns.length?'':'empty';
-    $('#campaigns').innerHTML=campaigns.length?`<div class="table-wrap"><table><thead><tr><th>Campanha</th><th>Estado</th><th>Roteamento</th><th>Execução</th></tr></thead><tbody>${campaigns.map(c=>{
-      const primary=instances.find(i=>i.id===(c.primaryInstanceId||(c.instanceIds||[])[0]));
-      return `<tr><td>${esc(c.name)}</td><td>${esc(c.status)}</td><td>Principal: ${esc(primary?.label||primary?.name||'não definida')}<br><span class="muted">Failover: ${c.failoverMode==='automatic'?'automático':'manual'}</span></td><td>${esc(c.runtimeStatus||'ready')}</td></tr>`}).join('')}</tbody></table></div>`:'Nenhuma campanha criada.';
+    const primary=$('#primaryInstance'), fallback=$('#fallbackInstances');
+    const oldPrimary=primary.value, oldFallback=new Set([...fallback.selectedOptions].map(o=>o.value));
+    primary.replaceChildren(); fallback.replaceChildren();
+    for(const instance of instances){
+      const label=instance.label||instance.name;
+      const primaryOption=new Option(label,instance.id,false,instance.id===oldPrimary||(!oldPrimary&&instance.operationalMode==='primary'));
+      const fallbackOption=new Option(label,instance.id,false,oldFallback.has(instance.id));
+      primary.add(primaryOption); fallback.add(fallbackOption);
+    }
   }
-  async function load(message='Painel atualizado.') { state=await api('/api/status'); render(); notice(message,'success'); }
+
+  function renderLeadDetail() {
+    const chosen=selected();
+    $('#selectionInfo').textContent=chosen.length?`${chosen.length} lead(s) selecionado(s).`:'Nenhum lead selecionado.';
+    if(chosen.length!==1){ $('#leadDetail').className='lead-detail muted'; $('#leadDetail').textContent=chosen.length?'Selecione somente um lead para revisar os detalhes e gerar a prévia.':'Selecione um lead para revisar os dados e gerar a prévia.'; return; }
+    const lead=chosen[0];
+    $('#leadDetail').className='lead-detail';
+    $('#leadDetail').innerHTML=`<strong>${esc(lead.name||'Sem nome')}</strong><br>
+      <span class="muted">Origem: ${esc(lead.sourceId||lead.sourceKey||'não informada')}</span><br>
+      <span>Tipo: ${esc(lead.type||'não informado')} · Situação: ${esc(permissionLabel(lead.contactPermission))}</span><br>
+      <span>Multa: ${esc(lead.infractionDescription||'descrição não informada')}</span><br>
+      <span class="muted">Telefones protegidos: ${esc((lead.phones||[]).join(', ')||'nenhum')}</span>`;
+  }
+
+  function renderLeads() {
+    $('#leads').className=leads.length?'':'empty';
+    $('#leads').innerHTML=leads.length?`<table><thead><tr><th></th><th>Nome</th><th>Ocorrência</th><th>Telefone</th><th>Situação</th><th>Origem</th></tr></thead><tbody>${leads.map(lead=>`<tr>
+      <td><input class="checkbox" type="checkbox" data-lead-id="${esc(lead.id)}" ${selectedLeadIds.has(lead.id)?'checked':''} aria-label="Selecionar ${esc(lead.name||'lead')}"></td>
+      <td><strong>${esc(lead.name||'Sem nome')}</strong><br><span class="muted">${esc(lead.classification||lead.type||'')}</span></td>
+      <td>${esc(lead.infractionDescription||lead.processNumber||'Não informada')}</td>
+      <td>${esc((lead.phones||[]).join(', ')||'Não informado')}</td>
+      <td><span class="pill ${lead.contactPermission==='approved'?'ok':lead.contactPermission==='blocked'?'bad':'warn'}">${esc(permissionLabel(lead.contactPermission))}</span></td>
+      <td>${esc(lead.sourceId||lead.sourceKey||'')}</td></tr>`).join('')}</tbody></table>`:'Nenhum lead importado do LexRadar.';
+    renderLeadDetail();
+  }
+
+  function renderCampaigns() {
+    const campaigns=state?.campaigns||[], instances=state?.instances||[];
+    $('#campaigns').className=campaigns.length?'':'empty';
+    $('#campaigns').innerHTML=campaigns.length?`<div class="table-wrap"><table><thead><tr><th>Campanha</th><th>Estado</th><th>Roteamento</th><th>Execução</th><th>Ação</th></tr></thead><tbody>${campaigns.map(c=>{
+      const primary=instances.find(i=>i.id===(c.primaryInstanceId||(c.instanceIds||[])[0]));
+      return `<tr><td><strong>${esc(c.name)}</strong><br><span class="muted">${esc(c.senderName||'sem atendente')}</span></td><td>${esc(c.status)}</td><td>Principal: ${esc(primary?.label||primary?.name||'não definida')}<br><span class="muted">Failover: ${c.failoverMode==='automatic'?'automático':'manual'}</span></td><td>${esc(c.runtimeStatus||'ready')}</td><td>${c.status==='draft'?`<button data-campaign-action="activate" data-id="${esc(c.id)}">Ativar com selecionados</button>`:'—'}</td></tr>`}).join('')}</tbody></table></div>`:'Nenhuma campanha criada.';
+  }
+
+  function render() { renderSummary(); renderInstances(); renderLeads(); renderCampaigns(); }
+  async function load(message='Painel atualizado.') {
+    const [statusResult,leadResult]=await Promise.all([api('/api/status'),api('/api/leads')]);
+    state=statusResult; leads=Array.isArray(leadResult)?leadResult:(leadResult.leads||[]);
+    const validIds=new Set(leads.map(lead=>lead.id)); for(const id of selectedLeadIds) if(!validIds.has(id)) selectedLeadIds.delete(id);
+    render(); notice(message,'success');
+  }
+
+  async function setPermission(permission) {
+    const ids=[...selectedLeadIds]; if(!ids.length)throw new Error('Selecione ao menos um lead.');
+    const reason=$('#permissionReason').value.trim();
+    await api('/api/leads/permission',{method:'POST',body:JSON.stringify({ids,permission,reason})});
+    await load(`${ids.length} lead(s) atualizado(s).`);
+  }
+
   $('#load').onclick=()=>load().catch(e=>notice(e.message,'error'));
   $('#refresh').onclick=async()=>{try{await api('/api/instances/refresh',{method:'POST'});await load('Conexões verificadas.')}catch(e){notice(e.message,'error')}};
   $('#createInstance').onclick=async()=>{try{const name=$('#instanceName').value.trim();if(!name)throw new Error('Informe o nome da linha.');const created=await api('/api/instances',{method:'POST',body:JSON.stringify({name})});$('#instanceName').value='';const data=created?.evolution?.qrcode?.base64;if(data){$('#qr').src=data;$('#qrWrap').style.display='block'}await load('Linha criada. Escaneie o QR Code.')}catch(e){notice(e.message,'error')}};
   $('#instances').onclick=async(event)=>{const button=event.target.closest('button[data-action]');if(!button)return;try{const {action,id,name}=button.dataset;
-    if(action==='primary')await api(`/api/instances/${id}/primary`,{method:'POST'});
-    if(action==='pause')await api(`/api/instances/${id}/configure`,{method:'POST',body:JSON.stringify({operationalMode:'paused'})});
-    if(action==='resume')await api(`/api/instances/${id}/configure`,{method:'POST',body:JSON.stringify({operationalMode:'standby',enabled:true})});
-    if(action==='limit'){const value=Number(document.querySelector(`[data-limit="${id}"]`).value);await api(`/api/instances/${id}/configure`,{method:'POST',body:JSON.stringify({dailyLimit:value})})}
+    if(action==='primary')await api(`/api/instances/${encodeURIComponent(id)}/primary`,{method:'POST'});
+    if(action==='pause')await api(`/api/instances/${encodeURIComponent(id)}/configure`,{method:'POST',body:JSON.stringify({operationalMode:'paused'})});
+    if(action==='resume')await api(`/api/instances/${encodeURIComponent(id)}/configure`,{method:'POST',body:JSON.stringify({operationalMode:'standby',enabled:true})});
+    if(action==='limit'){const value=Number(document.querySelector(`[data-limit="${CSS.escape(id)}"]`).value);await api(`/api/instances/${encodeURIComponent(id)}/configure`,{method:'POST',body:JSON.stringify({dailyLimit:value})})}
     if(action==='qr'){const data=await api(`/api/instances/${encodeURIComponent(name)}/qr`);const source=data.base64||data.qrcode?.base64;if(!source)throw new Error('A Evolution não retornou o QR Code.');$('#qr').src=source;$('#qrWrap').style.display='block'}
     await load('Configuração salva.');
   }catch(e){notice(e.message,'error')}};
+  $('#leads').onchange=(event)=>{const checkbox=event.target.closest('input[data-lead-id]');if(!checkbox)return;checkbox.checked?selectedLeadIds.add(checkbox.dataset.leadId):selectedLeadIds.delete(checkbox.dataset.leadId);renderLeadDetail();};
+  $('#selectAll').onclick=()=>{leads.forEach(lead=>selectedLeadIds.add(lead.id));renderLeads();};
+  $('#clearSelection').onclick=()=>{selectedLeadIds.clear();renderLeads();};
+  $('#approveLeads').onclick=()=>setPermission('approved').catch(e=>notice(e.message,'error'));
+  $('#reviewLeads').onclick=()=>setPermission('pending_review').catch(e=>notice(e.message,'error'));
+  $('#blockLeads').onclick=()=>setPermission('blocked').catch(e=>notice(e.message,'error'));
+  $('#previewMessage').onclick=async()=>{try{const chosen=selected();if(chosen.length!==1)throw new Error('Selecione exatamente um lead para gerar a prévia.');const senderName=$('#senderName').value.trim();if(!senderName)throw new Error('Informe o nome do atendente.');const result=await api('/api/messages/preview',{method:'POST',body:JSON.stringify({leadId:chosen[0].id,senderName,continuationTemplate:$('#continuation').value.trim()})});$('#messagePreview').textContent=result.message||result.preview||result.text||'';$('#messagePreview').className='preview';notice('Prévia gerada sem criar envios.','success')}catch(e){notice(e.message,'error')}};
+  $('#createCampaign').onclick=async()=>{try{
+    const primaryInstanceId=$('#primaryInstance').value;if(!primaryInstanceId)throw new Error('Selecione a linha principal.');
+    const fallbackInstanceIds=[...$('#fallbackInstances').selectedOptions].map(option=>option.value).filter(id=>id!==primaryInstanceId);
+    const senderName=$('#senderName').value.trim();if(!senderName)throw new Error('Informe o nome do atendente.');
+    const minDelayMs=Number($('#minDelay').value)*1000,maxDelayMs=Number($('#maxDelay').value)*1000;if(!minDelayMs||!maxDelayMs||maxDelayMs<minDelayMs)throw new Error('Confira os intervalos mínimo e máximo.');
+    const deliverySchedule={enabled:$('#scheduleEnabled').value==='true',timeZone:'America/Sao_Paulo',weekdays:[1,2,3,4,5],start:$('#scheduleStart').value,end:$('#scheduleEnd').value};
+    await api('/api/campaigns',{method:'POST',body:JSON.stringify({name:$('#campaignName').value.trim(),messageProfile:'infraction_first_contact',senderName,continuationTemplate:$('#continuation').value.trim(),instanceIds:[primaryInstanceId,...fallbackInstanceIds],primaryInstanceId,fallbackInstanceIds,failoverMode:$('#failoverMode').value,minDelayMs,maxDelayMs,deliverySchedule})});
+    await load('Campanha criada em rascunho. Revise e ative com os leads selecionados.');
+  }catch(e){notice(e.message,'error')}};
+  $('#campaigns').onclick=async(event)=>{const button=event.target.closest('button[data-campaign-action="activate"]');if(!button)return;try{const leadIds=[...selectedLeadIds];if(!leadIds.length)throw new Error('Selecione os leads aprovados que entrarão na campanha.');if(!confirm(`Ativar esta campanha com ${leadIds.length} lead(s) selecionado(s)?`))return;await api(`/api/campaigns/${encodeURIComponent(button.dataset.id)}/activate`,{method:'POST',body:JSON.stringify({leadIds})});await load('Campanha ativada e fila preparada.')}catch(e){notice(e.message,'error')}};
 </script></body></html>

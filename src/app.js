@@ -25,6 +25,10 @@ export function createHandler({ service, config }) {
       if (!admin(req, res)) return;
       if (req.method === 'GET' && url.pathname === '/api/status') return sendJson(res, 200, service.status());
       if (req.method === 'GET' && url.pathname === '/api/leads') return sendJson(res, 200, service.listLeads());
+      if (req.method === 'POST' && url.pathname === '/api/messages/preview') {
+        const { json } = await readBody(req);
+        return sendJson(res, 200, service.previewMessage(json.leadId, json.senderName, json.continuationTemplate));
+      }
       if (req.method === 'POST' && url.pathname === '/api/leads/permission') { const { json } = await readBody(req); return sendJson(res, 200, service.setLeadPermission(json.ids, json.permission, json.reason)); }
       if (req.method === 'POST' && url.pathname === '/api/instances') { const { json } = await readBody(req); return sendJson(res, 201, await service.addInstance(json.name)); }
       if (req.method === 'POST' && url.pathname === '/api/instances/refresh') return sendJson(res, 200, await service.refreshInstances());

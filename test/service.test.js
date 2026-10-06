@@ -33,6 +33,33 @@ test('worker nao dispara quando a chave global esta desligada', async () => {
   } finally { fs.rmSync(ctx.root, { recursive: true, force: true }); }
 });
 
+test('campanha fora da janela nao bloqueia outra campanha elegivel', async () => {
+  const ctx = fixture(true);
+  try {
+    await ctx.service.addInstance('principal');
+    const instance = ctx.store.state.instances[0]; instance.state = 'open'; ctx.store.save();
+    ctx.service.importLeads([
+      { schemaVersion: 1, sourceId: 'agenda-1', dataMode: 'live', phones: ['11999991001'], name: 'Primeiro' },
+      { schemaVersion: 1, sourceId: 'agenda-2', dataMode: 'live', phones: ['11999991002'], name: 'Segundo' }
+    ]);
+    const [firstLead, secondLead] = ctx.store.state.leads;
+    ctx.service.setLeadPermission([firstLead.id, secondLead.id], 'approved', 'Fixture');
+    const weekdayName = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Sao_Paulo', weekday: 'short' }).format(new Date());
+    const weekday = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }[weekdayName];
+    const blocked = ctx.service.createCampaign({
+      name: 'Fora da janela', template: 'Primeira', instanceIds: [instance.id],
+      deliverySchedule: { enabled: true, weekdays: [(weekday + 1) % 7], start: '00:00', end: '23:59' }
+    });
+    const allowed = ctx.service.createCampaign({ name: 'Permitida', template: 'Segunda', instanceIds: [instance.id] });
+    ctx.service.activateCampaign(blocked.id, [firstLead.id]);
+    ctx.service.activateCampaign(allowed.id, [secondLead.id]);
+    assert.equal(await ctx.service.tick(), true);
+    assert.equal(ctx.store.state.campaigns.find((item) => item.id === blocked.id).runtimeStatus, 'waiting_schedule');
+    assert.equal(ctx.store.state.jobs.find((job) => job.campaignId === blocked.id).status, 'queued');
+    assert.equal(ctx.store.state.jobs.find((job) => job.campaignId === allowed.id).status, 'sent');
+  } finally { fs.rmSync(ctx.root, { recursive: true, force: true }); }
+});
+
 test('campanha aprovada usa linha principal e registra envio', async () => {
   const ctx = fixture(true);
   try {
@@ -119,5 +146,85 @@ test('campanha de multa usa abertura padrao e nome do atendente', async () => {
     ctx.service.activateCampaign(campaign.id, [lead.id]);
     assert.equal(await ctx.service.tick(), true);
     assert.equal(ctx.calls[0][2], 'Olá Ana, meu nome é Mariana. Identificamos através do Diário Oficial a multa por avançar o sinal vermelho.\n\nSe desejar mais informações, responda esta mensagem.');
+  } finally { fs.rmSync(ctx.root, { recursive: true, force: true }); }
+});
+
+test('pedido de descadastro bloqueia lead, cancela fila e impede nova aprovacao', async () => {
+  const ctx = fixture(false);
+  try {
+    ctx.service.importLeads([{
+      schemaVersion: 1, sourceId: 'optout-1', dataMode: 'live', phones: ['11999990004'],
+      name: 'Ana Silva', infractionDescription: 'por avançar o sinal vermelho'
+    }]);
+    const lead = ctx.store.state.leads[0];
+    ctx.store.state.jobs.push({ id: 'job-optout', leadId: lead.id, status: 'queued' });
+    ctx.store.save();
+    const event = {
+      event: 'messages.upsert', instance: 'principal',
+      data: { key: { id: 'msg-optout', fromMe: false, remoteJid: '5511999990004@s.whatsapp.net' }, message: { conversation: 'Não quero receber' } }
+    };
+    const result = ctx.service.recordWebhook(JSON.stringify(event), event);
+    assert.equal(result.optOut.leadsBlocked, 1);
+    assert.equal(result.optOut.jobsCancelled, 1);
+    assert.equal(ctx.store.state.leads[0].contactPermission, 'blocked');
+    assert.equal(ctx.store.state.jobs[0].status, 'cancelled');
+    assert.throws(() => ctx.service.setLeadPermission([lead.id], 'approved', 'Tentativa'), /descadastro/);
+  } finally { fs.rmSync(ctx.root, { recursive: true, force: true }); }
+});
+
+test('gera previa de multa sem enviar nem criar job', () => {
+  const ctx = fixture(false);
+  try {
+    ctx.service.importLeads([{
+      schemaVersion: 1, sourceId: 'previa-1', dataMode: 'live', phones: ['11999990004'],
+      name: 'Ana Silva', infractionDescription: 'por avancar o sinal vermelho'
+    }]);
+    const lead = ctx.store.state.leads[0];
+    const result = ctx.service.previewMessage(lead.id, 'Mariana', 'Podemos explicar as opcoes para voce.');
+    assert.equal(result.leadId, lead.id);
+    assert.equal(result.messageProfile, 'infraction_first_contact');
+    assert.match(result.message, /Ana/);
+    assert.match(result.message, /Mariana/);
+    assert.match(result.message, /por avancar o sinal vermelho/);
+    assert.match(result.message, /Podemos explicar as opcoes para voce/);
+    assert.equal(result.characterCount, result.message.length);
+    assert.equal(ctx.store.state.jobs.length, 0);
+    assert.equal(ctx.calls.length, 0);
+  } finally { fs.rmSync(ctx.root, { recursive: true, force: true }); }
+});
+
+test('previa de multa exige lead completo', () => {
+  const ctx = fixture(false);
+  try {
+    ctx.service.importLeads([{
+      schemaVersion: 1, sourceId: 'previa-incompleta', dataMode: 'live', phones: ['11999990005'], name: 'Ana'
+    }]);
+    const lead = ctx.store.state.leads[0];
+    assert.throws(() => ctx.service.previewMessage(lead.id, 'Mariana', ''), /descricao da multa/);
+    assert.throws(() => ctx.service.previewMessage('inexistente', 'Mariana', ''), /Lead nao encontrado/);
+    assert.equal(ctx.calls.length, 0);
+  } finally { fs.rmSync(ctx.root, { recursive: true, force: true }); }
+});
+
+test('ativacao congela a mensagem revisada no job', async () => {
+  const ctx = fixture(true);
+  try {
+    await ctx.service.addInstance('principal');
+    const instance = ctx.store.state.instances[0]; instance.state = 'open'; ctx.store.save();
+    ctx.service.importLeads([{
+      schemaVersion: 1, sourceId: 'snapshot-1', dataMode: 'live', phones: ['11999990006'],
+      name: 'Ana Silva', infractionDescription: 'original'
+    }]);
+    const lead = ctx.store.state.leads[0]; ctx.service.setLeadPermission([lead.id], 'approved', 'Fixture');
+    const campaign = ctx.service.createCampaign({
+      name: 'Snapshot', messageProfile: 'infraction_first_contact', senderName: 'Mariana', instanceIds: [instance.id]
+    });
+    ctx.service.activateCampaign(campaign.id, [lead.id]);
+    const approvedMessage = ctx.store.state.jobs[0].message;
+    lead.infractionDescription = 'alterada depois da aprovacao'; ctx.store.save();
+    await ctx.service.tick();
+    assert.equal(ctx.calls[0][2], approvedMessage);
+    assert.match(approvedMessage, /original/);
+    assert.doesNotMatch(approvedMessage, /alterada depois/);
   } finally { fs.rmSync(ctx.root, { recursive: true, force: true }); }
 });
