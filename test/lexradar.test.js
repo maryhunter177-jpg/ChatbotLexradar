@@ -3,7 +3,34 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { extractEligibleLeads, readLexRadarState } from '../src/integrations/lexradar.js';
+import { discoverLexRadarStatePath, extractEligibleLeads, readLexRadarState } from '../src/integrations/lexradar.js';
+
+test('descobre a base pelo marcador oficial do LexRadar em outro computador', () => {
+  const appData = 'C:\\Users\\Cliente\\AppData\\Roaming';
+  const marker = path.win32.join(appData, 'lexradar', 'data-root-location.json');
+  const fsApi = {
+    existsSync: (target) => target === marker,
+    readFileSync: (target) => {
+      assert.equal(target, marker);
+      return JSON.stringify({ version: 1, dataRoot: 'E:\\LexRadar-Dados' });
+    }
+  };
+  assert.equal(discoverLexRadarStatePath({ platform: 'win32', appData, homeDir: 'C:\\Users\\Cliente', fsApi, pathApi: path.win32 }), 'E:\\LexRadar-Dados\\data\\lexradar-data.json');
+});
+
+test('usa caminho explicito quando configurado e fallback de Documentos sem marcador', () => {
+  assert.equal(discoverLexRadarStatePath({ explicitPath: 'F:\\Base\\estado.json', platform: 'win32', pathApi: path.win32 }), 'F:\\Base\\estado.json');
+  const expected = 'C:\\Users\\Cliente\\Documents\\LexRadar-Dados\\data\\lexradar-data.json';
+  const fsApi = { existsSync: (target) => target === expected };
+  assert.equal(discoverLexRadarStatePath({ platform: 'win32', appData: '', homeDir: 'C:\\Users\\Cliente', fsApi, pathApi: path.win32 }), expected);
+});
+
+test('falha visivelmente quando o marcador do LexRadar esta invalido', () => {
+  const appData = 'C:\\Users\\Cliente\\AppData\\Roaming';
+  const marker = path.win32.join(appData, 'lexradar', 'data-root-location.json');
+  const fsApi = { existsSync: (target) => target === marker, readFileSync: () => '{' };
+  assert.throws(() => discoverLexRadarStatePath({ platform: 'win32', appData, fsApi, pathApi: path.win32 }), /local de dados/);
+});
 
 test('extrai somente resultado live finalizado com telefone', () => {
   const state = { settings: { mode: 'live' }, records: [

@@ -8,7 +8,7 @@ Na homologacao, `BOT_REMOTE_URL` aponta exclusivamente para `http://127.0.0.1:31
 
 ## Instalacao local da ponte (Windows)
 
-1. Copie `.env.example` para `.env` e configure `LEXRADAR_STATE_PATH` com o JSON real.
+1. Abra o LexRadar ao menos uma vez. A ponte le o marcador `%APPDATA%\lexradar\data-root-location.json` e encontra automaticamente o JSON ativo, mesmo que esteja em outra unidade. Use `LEXRADAR_STATE_PATH` apenas se desejar substituir deliberadamente essa deteccao.
 2. Coloque em `BOT_BRIDGE_TOKEN` o mesmo segredo existente na VPS. O segredo fica apenas no `.env`, que e ignorado pelo Git.
 3. Mantenha `BOT_REMOTE_URL=http://127.0.0.1:3100` e `BRIDGE_ALLOW_REMOTE=false`.
 4. Mantenha a chave SSH privada fora do repositorio, preferencialmente em `%USERPROFILE%\.ssh\lexradar-vps`.
@@ -32,6 +32,18 @@ npm run bridge:check
 ```
 
 O supervisor usa `StrictHostKeyChecking=yes`, falha se o encaminhamento nao puder ser criado, envia keepalive e reabre o tunel/bridge apos uma queda. Logs locais sao gravados em `logs/`, sem registrar o token.
+
+## Instalacao em outro computador
+
+O bot nao depende do caminho do executavel. Em cada computador do cliente:
+
+1. Instale ou abra o LexRadar normalmente, sem alterar seus arquivos.
+2. Instale a ponte em uma pasta separada.
+3. Configure apenas a chave SSH e o `BOT_BRIDGE_TOKEN` entregues para aquele ambiente.
+4. Rode `npm run bridge:check`; o resultado informa somente a quantidade elegivel.
+5. Inicie o supervisor ou a tarefa de logon.
+
+O painel e o estado operacional permanecem na VPS. O computador local apenas le a base ativa e sincroniza o DTO minimo pelo tunel seguro.
 
 Para iniciar automaticamente no logon do usuario atual:
 

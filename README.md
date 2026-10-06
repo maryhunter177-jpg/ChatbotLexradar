@@ -7,6 +7,8 @@ Fundacao do modulo complementar ao LexRadar 1.7.0. O projeto mantem o aplicativo
 
 Por seguranca, leads entram como `pending_review`, o worker inicia desabilitado e nenhum disparo ocorre sem aprovacao explicita.
 
+Em cada computador Windows, a ponte detecta a base ativa pelo marcador oficial `%APPDATA%\lexradar\data-root-location.json` criado pelo proprio LexRadar. Isso funciona tanto com a instalacao quanto com a versao portatil e preserva o EXE sem modificacoes. `LEXRADAR_STATE_PATH` fica disponivel apenas como substituicao manual para ambientes especiais.
+
 O painel operacional permite revisar leads, gerar a previa com a abertura obrigatoria, aprovar ou bloquear contatos, configurar a linha principal e contingencias e preparar campanhas em rascunho. A ativacao congela a mensagem revisada em cada job para que uma alteracao posterior no LexRadar nao modifique um envio ja aprovado.
 
 ## Gestao de linhas

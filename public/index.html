@@ -111,6 +111,7 @@
     const instances=state?.instances||[];
     $('#summary').innerHTML=`
       <div class="metric"><span class="muted">Evolution API</span><strong>${state?.evolutionConfigured?'Configurada':'Pendente'}</strong></div>
+      <div class="metric"><span class="muted">Integração LexRadar</span><strong>${state?.lexradarIntegration?.synchronized?'Sincronizada':'Aguardando'}</strong>${state?.lexradarIntegration?.lastSyncAt?`<small class="muted">${esc(new Date(state.lexradarIntegration.lastSyncAt).toLocaleString('pt-BR'))}</small>`:''}</div>
       <div class="metric"><span class="muted">Linhas conectadas</span><strong>${instances.filter(i=>['open','connected'].includes(i.state)).length}/${instances.length}</strong></div>
       <div class="metric"><span class="muted">Leads importados</span><strong>${Number(state?.leads?.total)||0}</strong></div>
       <div class="metric"><span class="muted">Disparos</span><strong>${state?.dispatchEnabled?'Habilitados':'Desativados'}</strong></div>`;

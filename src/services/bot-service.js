@@ -59,9 +59,17 @@ export class BotService {
   status() {
     const state = this.store.state;
     const counts = (items, field) => Object.fromEntries([...new Set(items.map((item) => item[field]))].map((key) => [key, items.filter((item) => item[field] === key).length]));
+    const lastImport = state.audit.find((item) => item.action === 'leads.imported');
     return {
       dispatchEnabled: this.dispatchEnabled,
       evolutionConfigured: this.evolution.configured(),
+      lexradarIntegration: {
+        synchronized: Boolean(lastImport),
+        lastSyncAt: lastImport?.at || '',
+        inserted: Number(lastImport?.inserted) || 0,
+        updated: Number(lastImport?.updated) || 0,
+        ignored: Number(lastImport?.ignored) || 0
+      },
       instances: state.instances,
       leads: { total: state.leads.length, byPermission: counts(state.leads, 'contactPermission') },
       campaigns: state.campaigns,
